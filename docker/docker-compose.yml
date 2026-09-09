@@ -1,0 +1,68 @@
+# ============================================================
+# MedFusion AI — Docker Compose
+# Orchestrates backend, frontend, and PostgreSQL services
+# ============================================================
+
+services:
+  # --- PostgreSQL Database ---
+  db:
+    image: postgres:16-alpine
+    container_name: medfusion-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-medfusion}
+      POSTGRES_USER: ${DB_USER:-medfusion_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password is required}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-medfusion_user} -d ${DB_NAME:-medfusion}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # --- FastAPI Backend ---
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    container_name: medfusion-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - uploads:/app/uploads
+      - logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # --- React Frontend (Nginx) ---
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    container_name: medfusion-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+    driver: local
+  uploads:
+    driver: local
+  logs:
+    driver: local
