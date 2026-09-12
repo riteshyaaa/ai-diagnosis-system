@@ -4,15 +4,23 @@ MedFusion AI — Authentication Schemas.
 Pydantic models for login requests, token responses, and session payloads.
 """
 
-from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated, Optional
+from pydantic import BaseModel, Field
 
 from app.schemas.user import UserResponse
+
+EmailType = Annotated[
+    str,
+    Field(
+        pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
+        description="Valid email address",
+    ),
+]
 
 
 class LoginRequest(BaseModel):
     """Payload for username/password authentication."""
-    email: EmailStr
+    email: EmailType
     password: str = Field(..., min_length=1)
 
 

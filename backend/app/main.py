@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import api_v1_router
 from app.config import get_settings
+from app.database import engine
+from app.models import Base
 from app.exceptions import (
     AccountLockedError,
     AuthenticationError,
@@ -26,6 +28,7 @@ from app.exceptions import (
     InferenceError,
     ModelNotFoundError,
     NotFoundError,
+    PreprocessingError,
     ValidationError,
 )
 
@@ -36,12 +39,15 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan manager.
-    Initializes database pools and warms up model caches on startup.
+    Initializes database pools and tables on startup.
     Cleans up resources on shutdown.
     """
-    # Startup
+    # Startup: Ensure database schema / tables are created
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
-    # Shutdown
+    # Shutdown: Dispose database connection pool
+    await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -117,6 +123,13 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"error": "FileValidationError", "detail": exc.message},
+        )
+
+    @app.exception_handler(PreprocessingError)
+    async def preprocessing_exception_handler(request: Request, exc: PreprocessingError):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"error": "PreprocessingError", "detail": exc.message},
         )
 
     @app.exception_handler(ModelNotFoundError)

@@ -5,16 +5,25 @@ Pydantic models for user creation, update, and response serialization.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.user import UserRole
+
+# RFC compliant email pattern for type validation
+EmailType = Annotated[
+    str,
+    Field(
+        pattern=r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$",
+        description="Valid email address",
+    ),
+]
 
 
 class UserBase(BaseModel):
     """Base user fields."""
-    email: EmailStr
+    email: EmailType
     full_name: str = Field(..., min_length=2, max_length=255)
     role: UserRole = UserRole.CLINICIAN
     department: Optional[str] = Field(None, max_length=100)

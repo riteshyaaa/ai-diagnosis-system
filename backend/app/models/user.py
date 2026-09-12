@@ -8,7 +8,7 @@ Stores user credentials, roles, profile metadata, and account security flags:
 """
 
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -81,8 +81,13 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     def is_locked(self, current_time: datetime) -> bool:
         """Check if account is currently locked out."""
-        if self.locked_until and self.locked_until > current_time:
-            return True
+        if self.locked_until:
+            locked_until = self.locked_until
+            if locked_until.tzinfo is None and current_time.tzinfo is not None:
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            elif locked_until.tzinfo is not None and current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
+            return locked_until > current_time
         return False
 
     def __repr__(self) -> str:

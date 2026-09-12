@@ -57,7 +57,11 @@ class AuthService:
 
         now = datetime.now(timezone.utc)
         if user.is_locked(now):
-            remaining_minutes = int((user.locked_until - now).total_seconds() / 60) + 1
+            locked_until = user.locked_until
+            if locked_until and locked_until.tzinfo is None:
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            remaining_seconds = (locked_until - now).total_seconds() if locked_until else 0
+            remaining_minutes = max(1, int(remaining_seconds / 60) + 1)
             raise AccountLockedError(
                 f"Account is locked due to too many failed attempts. Try again in {remaining_minutes} minutes."
             )

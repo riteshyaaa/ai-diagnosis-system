@@ -1,18 +1,14 @@
 """
 MedFusion AI — Password Hashing & Verification.
 
-Uses passlib with bcrypt (12 rounds) for secure password storage.
+Uses native bcrypt (12 rounds) for secure clinical-grade password storage.
 Never store or log plaintext passwords.
 """
 
-from passlib.context import CryptContext
+import bcrypt
 
-# Configure bcrypt with 12 rounds work factor
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=12,
-)
+# Work factor: 12 rounds for HIPAA / security compliance
+BCRYPT_ROUNDS = 12
 
 
 def hash_password(password: str) -> str:
@@ -23,9 +19,11 @@ def hash_password(password: str) -> str:
         password: Plaintext password to hash.
 
     Returns:
-        Secure bcrypt hash string.
+        Secure bcrypt hash string UTF-8 decoded.
     """
-    return pwd_context.hash(password)
+    salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
+    hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -34,12 +32,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
     Args:
         plain_password: Password entered by user.
-        hashed_password: Stored bcrypt hash.
+        hashed_password: Stored bcrypt hash string.
 
     Returns:
         True if password matches, False otherwise.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"),
+            hashed_password.encode("utf-8"),
+        )
+    except Exception:
+        return False
 
 
 def is_password_strong(password: str) -> tuple[bool, str]:
