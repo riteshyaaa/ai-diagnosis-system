@@ -1,34 +1,51 @@
-import { Routes, Route } from "react-router-dom";
-
 /**
- * MedFusion AI — Root Application Component
- *
- * Routes and layouts will be added incrementally in subsequent phases.
+ * MedFusion AI — Root Application Routing & Component Tree
  */
+
+import { Routes, Route, Navigate } from "react-router-dom";
+import { ProtectedRoute } from "./components/auth/ProtectedRoute";
+import { AppLayout } from "./components/layout/AppLayout";
+import { LoginPage } from "./pages/LoginPage";
+import { RegisterPage } from "./pages/RegisterPage";
+import { CasesPage } from "./pages/CasesPage";
+import { CaseDetailPage } from "./pages/CaseDetailPage";
+import { NewCasePage } from "./pages/NewCasePage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { AuditPage } from "./pages/AuditPage";
+import { UserRole } from "./types";
+
 function App() {
   return (
     <Routes>
+      {/* Public Authentication Routes */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+
+      {/* Protected Diagnostic & Clinical Workstation Routes */}
       <Route
-        path="/"
         element={
-          <div className="flex min-h-screen items-center justify-center">
-            <div className="card max-w-lg text-center">
-              <h1 className="text-3xl font-bold text-primary-700">
-                MedFusion AI
-              </h1>
-              <p className="mt-2 text-gray-500">
-                Multimodal Clinical Decision Support System
-              </p>
-              <p className="mt-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
-                ⚕️ AI-generated output is for clinical decision support and
-                research purposes only. It is not a substitute for professional
-                medical judgment.
-              </p>
-              <p className="mt-4 text-xs text-gray-400">v0.1.0 — Phase 1</p>
-            </div>
-          </div>
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
         }
-      />
+      >
+        <Route path="/" element={<Navigate to="/cases" replace />} />
+        <Route path="/cases" element={<CasesPage />} />
+        <Route path="/cases/new" element={<NewCasePage />} />
+        <Route path="/cases/:id" element={<CaseDetailPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route
+          path="/audit"
+          element={
+            <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.AUDITOR]}>
+              <AuditPage />
+            </ProtectedRoute>
+          }
+        />
+      </Route>
+
+      {/* Fallback Catch-all Route */}
+      <Route path="*" element={<Navigate to="/cases" replace />} />
     </Routes>
   );
 }
