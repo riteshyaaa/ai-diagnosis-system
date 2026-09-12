@@ -1,8 +1,17 @@
 """
-MedFusion AI — Image Model Module.
-
-DenseNet-121 and EfficientNet-B0 architectures for multi-label
-chest X-ray classification (NIH ChestX-ray14 labels). Includes
-transfer-learning head replacement and embedding extraction for
-the fusion pipeline.
+MedFusion AI — Chest Radiograph Deep Learning Models Package.
 """
+
+from ml.models.image.backbones import (
+    BaseVisionBackbone,
+    DenseNet121Backbone,
+    EfficientNetB0Backbone,
+)
+from ml.models.image.classifier import ChestXRayClassifier
+
+__all__ = [
+    "BaseVisionBackbone",
+    "DenseNet121Backbone",
+    "EfficientNetB0Backbone",
+    "ChestXRayClassifier",
+]

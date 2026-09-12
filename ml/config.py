@@ -8,7 +8,7 @@ are defined here to ensure reproducibility.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 # Project root (two levels up from ml/)
@@ -44,6 +44,7 @@ class ImageModelConfig:
     learning_rate: float = 1e-4
     weight_decay: float = 1e-5
     patience: int = 5  # Early stopping patience (validation AUC)
+    early_stopping_patience: int = 5
 
     # Augmentation
     horizontal_flip_prob: float = 0.5
@@ -66,6 +67,12 @@ class ImageModelConfig:
     test_ratio: float = 0.15
     random_seed: int = 42
 
+    def __post_init__(self):
+        if self.early_stopping_patience != 5 and self.patience == 5:
+            self.patience = self.early_stopping_patience
+        elif self.patience != 5 and self.early_stopping_patience == 5:
+            self.early_stopping_patience = self.patience
+
 
 @dataclass
 class TabularModelConfig:
@@ -74,13 +81,22 @@ class TabularModelConfig:
     # Dataset
     dataset_name: str = "uci_heart_disease"
 
-    # Training
+    # Neural & Tree Training
+    batch_size: int = 32
+    num_epochs: int = 50
+    learning_rate: float = 1e-3
+    weight_decay: float = 1e-4
+    patience: int = 5
+    early_stopping_patience: int = 5
+    hidden_dims: List[int] = field(default_factory=lambda: [128, 64])
+
+    # Splits & CV
     test_size: float = 0.15
     val_size: float = 0.15
     random_seed: int = 42
     cv_folds: int = 5
 
-    # XGBoost defaults (will be tuned via Optuna)
+    # XGBoost / Tree defaults (can be tuned via Optuna)
     xgb_max_depth: int = 6
     xgb_learning_rate: float = 0.1
     xgb_n_estimators: int = 200
@@ -89,6 +105,12 @@ class TabularModelConfig:
 
     # Calibration
     calibration_method: str = "isotonic"  # isotonic, platt
+
+    def __post_init__(self):
+        if self.early_stopping_patience != 5 and self.patience == 5:
+            self.patience = self.early_stopping_patience
+        elif self.patience != 5 and self.early_stopping_patience == 5:
+            self.early_stopping_patience = self.patience
 
 
 @dataclass
@@ -104,13 +126,25 @@ class FusionModelConfig:
     batch_size: int = 16
     num_epochs: int = 30
     learning_rate: float = 5e-5
+    weight_decay: float = 1e-4
     dropout_rate: float = 0.4
     random_seed: int = 42
+    patience: int = 5
+    early_stopping_patience: int = 5
+    pathology_weight: float = 1.0
+    risk_weight: float = 1.0
+    fusion_strategy: str = "gated"
 
     # Encoder freezing strategy
     freeze_image_encoder: bool = True
     freeze_tabular_encoder: bool = True
     fine_tune_after_epoch: int = 10  # Unfreeze after this epoch
+
+    def __post_init__(self):
+        if self.early_stopping_patience != 5 and self.patience == 5:
+            self.patience = self.early_stopping_patience
+        elif self.patience != 5 and self.early_stopping_patience == 5:
+            self.early_stopping_patience = self.patience
 
 
 @dataclass

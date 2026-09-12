@@ -1,0 +1,27 @@
+{
+  "model_name": "tabular_risk_mlp",
+  "model_type": "tabular_mlp",
+  "version": "1.0.0",
+  "created_at": "2026-09-10T04:48:57.804201",
+  "status": "active",
+  "description": "Deep Tabular Residual MLP for Clinical Cardiovascular Risk Prediction",
+  "author": "MedFusion AI System",
+  "framework": "PyTorch / Scikit-Learn",
+  "metrics": {
+    "auroc": 0.892,
+    "brier_score": 0.084,
+    "ece": 0.026
+  },
+  "hyperparameters": {
+    "input_dim": 13,
+    "embedding_dim": 128,
+    "hidden_dim": 128
+  },
+  "input_schema": {},
+  "output_schema": {},
+  "sha256_checksum": "312c74c8c7574f133ef2dc45d9dcc1a2878e39731feb2150bed6fb5595157a3c",
+  "artifact_filename": "tabular_risk_mlp_v1.0.0.pt",
+  "auxiliary_files": [
+    "calibrator.joblib"
+  ]
+}

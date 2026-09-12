@@ -1,7 +1,31 @@
 """
-MedFusion AI — Inference Package.
-
-Production inference pipeline: model loading from registry,
-preprocessing, prediction with confidence estimation, and
-explanation generation packaged into a single callable interface.
+Inference Package for MedFusion AI.
 """
+
+from ml.inference.schemas import (
+    ConfidenceBand,
+    ExplainabilitySummary,
+    InferenceModality,
+    InferenceRequest,
+    InferenceResponse,
+    ModalityGatingWeights,
+    PathologyFinding,
+    RiskTier,
+    TabularRiskFinding,
+    UncertaintyEstimation,
+)
+from ml.inference.service import UnifiedInferenceService
+
+__all__ = [
+    "ConfidenceBand",
+    "ExplainabilitySummary",
+    "InferenceModality",
+    "InferenceRequest",
+    "InferenceResponse",
+    "ModalityGatingWeights",
+    "PathologyFinding",
+    "RiskTier",
+    "TabularRiskFinding",
+    "UncertaintyEstimation",
+    "UnifiedInferenceService",
+]

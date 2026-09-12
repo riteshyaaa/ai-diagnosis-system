@@ -1,0 +1,24 @@
+{
+  "model_name": "chest_xray_vision",
+  "model_type": "vision_classifier",
+  "version": "1.0.0",
+  "created_at": "2026-09-10T04:48:57.796207",
+  "status": "active",
+  "description": "DenseNet-121 Chest Radiograph 5-Pathology Multi-Label Classifier",
+  "author": "MedFusion AI System",
+  "framework": "PyTorch / Scikit-Learn",
+  "metrics": {
+    "macro_auroc": 0.884,
+    "macro_f1": 0.812
+  },
+  "hyperparameters": {
+    "backbone": "densenet121",
+    "embedding_dim": 512,
+    "num_classes": 5
+  },
+  "input_schema": {},
+  "output_schema": {},
+  "sha256_checksum": "4445184059d34fb08da22bddf89494e2f8af82c53fa378425d3654add6aa6a3c",
+  "artifact_filename": "chest_xray_vision_v1.0.0.pt",
+  "auxiliary_files": []
+}

@@ -1,8 +1,15 @@
 """
-MedFusion AI — Fusion Model Module.
-
-Late-fusion multimodal architecture that combines:
-  - Image embeddings (from frozen DenseNet-121 / EfficientNet-B0)
-  - Clinical embeddings (from frozen tabular encoder)
-into a shared representation via MLP for joint prediction.
+MedFusion AI — Multimodal Fusion Architecture Package.
 """
+
+from ml.models.fusion.late_fusion import (
+    CrossModalAttentionFusion,
+    GatedMultimodalFusion,
+    MultimodalLateFusionModel,
+)
+
+__all__ = [
+    "MultimodalLateFusionModel",
+    "GatedMultimodalFusion",
+    "CrossModalAttentionFusion",
+]
