@@ -17,8 +17,9 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1 import api_v1_router
 from app.config import get_settings
-from app.database import engine
+from app.database import AsyncSessionLocal, engine
 from app.models import Base
+from app.services.demo_user_service import seed_demo_users
 from app.exceptions import (
     AccountLockedError,
     AuthenticationError,
@@ -45,6 +46,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup: Ensure database schema / tables are created
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    if settings.demo_users_enabled and settings.debug and settings.app_env == "development":
+        async with AsyncSessionLocal() as session:
+            await seed_demo_users(session)
+            await session.commit()
     yield
     # Shutdown: Dispose database connection pool
     await engine.dispose()

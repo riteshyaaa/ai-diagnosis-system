@@ -13,6 +13,28 @@ Tests the full authentication workflow:
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.demo_user_service import DEMO_PASSWORD, DEMO_USERS, seed_demo_users
+
+
+@pytest.mark.asyncio
+async def test_demo_personas_can_log_in(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    """Verify each explicitly seeded hospital demo persona can authenticate."""
+    await seed_demo_users(db_session)
+    await seed_demo_users(db_session)
+    await db_session.commit()
+
+    for email, _, role, _ in DEMO_USERS:
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": DEMO_PASSWORD},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["user"]["role"] == role.value
 
 
 @pytest.mark.asyncio

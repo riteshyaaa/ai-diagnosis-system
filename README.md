@@ -70,6 +70,8 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
+# For local demo logins, set APP_ENV=development, DEBUG=true, and
+# DEMO_USERS_ENABLED=true in the repository-root .env file.
 uvicorn app.main:app --reload --port 8000
 
 # Frontend (in another terminal)
@@ -77,6 +79,10 @@ cd frontend
 npm install
 npm run dev
 ```
+
+When `DEMO_USERS_ENABLED=true`, the backend seeds the demo personas only when
+`APP_ENV=development` and `DEBUG=true`. The Quick Login buttons use
+`MedFusion#2026Secure!`; demo accounts must not be enabled in production.
 
 ---
 

@@ -11,18 +11,28 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 
 settings = get_settings()
 
+engine_kwargs = {"echo": settings.debug}
+if settings.effective_database_url.startswith("sqlite"):
+    engine_kwargs.update({"poolclass": StaticPool})
+else:
+    engine_kwargs.update(
+        {
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+            "pool_timeout": settings.db_pool_timeout,
+            "pool_recycle": 1800,
+        }
+    )
+
 # Create async engine with pooling parameters
 engine: AsyncEngine = create_async_engine(
     settings.effective_database_url,
-    pool_size=settings.db_pool_size,
-    max_overflow=settings.db_max_overflow,
-    pool_timeout=settings.db_pool_timeout,
-    pool_recycle=1800,  # recycle connections after 30 minutes
-    echo=settings.debug,
+    **engine_kwargs,
 )
 
 # Async session factory
