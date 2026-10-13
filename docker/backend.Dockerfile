@@ -41,6 +41,8 @@ RUN groupadd --gid 1000 medfusion && \
     useradd --uid 1000 --gid medfusion --create-home medfusion
 
 COPY backend/app ./app
+COPY backend/alembic ./backend/alembic
+COPY backend/alembic.ini ./backend/alembic.ini
 COPY ml ./ml
 COPY models ./models
 
@@ -55,4 +57,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "cd /app/backend && alembic -c alembic.ini upgrade head && cd /app && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

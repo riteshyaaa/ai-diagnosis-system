@@ -7,6 +7,7 @@ import { useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
   FileCheck,
+  FileText,
   Zap,
 } from "lucide-react";
 import { useCaseStore } from "../stores/case.store";
@@ -21,7 +22,19 @@ import { ModalityGatingGauge } from "../components/diagnostic/ModalityGatingGaug
 import { PredictionOverview } from "../components/diagnostic/PredictionOverview";
 import { ReviewSubmissionModal } from "../components/review/ReviewSubmissionModal";
 import { ReviewHistoryList } from "../components/review/ReviewHistoryList";
-import { ModelType } from "../types";
+import { CaseReportPreviewPanel } from "../components/diagnostic/CaseReportPreviewPanel";
+import { caseService } from "../services/cases.service";
+import { apiErrorMessage } from "../utils/apiError";
+import type { CaseReportPreview, ImageQualityReport } from "../types";
+
+function latestRecord<T>(records: T[], getTimestamp: (record: T) => string): T | null {
+  return records.reduce<T | null>((latest, record) => {
+    if (!latest || Date.parse(getTimestamp(record)) > Date.parse(getTimestamp(latest))) {
+      return record;
+    }
+    return latest;
+  }, null);
+}
 
 export const CaseDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -31,28 +44,50 @@ export const CaseDetailPage: React.FC = () => {
     activeExplanation,
     isLoading,
     isPredicting,
+    error,
     loadCase,
     runPrediction,
+    clearError,
   } = useCaseStore();
 
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<ModelType>(
-    ModelType.MULTIMODAL_LATE_FUSION
-  );
+  const [latestUploadQualityReport, setLatestUploadQualityReport] = useState<ImageQualityReport | null>(null);
+  const [reportPreview, setReportPreview] = useState<CaseReportPreview | null>(null);
+  const [isLoadingReport, setIsLoadingReport] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
+      setLatestUploadQualityReport(null);
+      setReportPreview(null);
+      setReportError(null);
       loadCase(id).catch(console.error);
     }
   }, [id, loadCase]);
 
   const handleRunPrediction = async () => {
     if (!id) return;
+    clearError();
+    setReportPreview(null);
     try {
-      await runPrediction(id, selectedModel);
+      await runPrediction(id);
       await loadCase(id);
-    } catch (err) {
-      console.error("Inference execution failed:", err);
+    } catch {
+      // The store exposes the API error in the workstation.
+    }
+  };
+
+  const handleReportPreview = async () => {
+    if (!id) return;
+    setIsLoadingReport(true);
+    setReportError(null);
+    try {
+      setReportPreview(await caseService.getReportPreview(id));
+    } catch (requestError) {
+      setReportPreview(null);
+      setReportError(apiErrorMessage(requestError, "Unable to generate the report preview."));
+    } finally {
+      setIsLoadingReport(false);
     }
   };
 
@@ -69,7 +104,7 @@ export const CaseDetailPage: React.FC = () => {
       <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
         <h2 className="text-lg font-bold text-gray-800">Case Not Found</h2>
         <p className="mt-1 text-xs text-gray-500">
-          The requested clinical case ID does not exist or access is unauthorized.
+          {error || "The requested clinical case ID does not exist or access is unauthorized."}
         </p>
         <Link
           to="/cases"
@@ -81,15 +116,8 @@ export const CaseDetailPage: React.FC = () => {
     );
   }
 
-  const primaryImage =
-    selectedCase.images && selectedCase.images.length > 0
-      ? selectedCase.images[0]
-      : null;
-
-  const primaryClinical =
-    selectedCase.clinical_records && selectedCase.clinical_records.length > 0
-      ? selectedCase.clinical_records[0]
-      : null;
+  const primaryImage = latestRecord(selectedCase.images, (image) => image.created_at);
+  const primaryClinical = latestRecord(selectedCase.clinical_records, (record) => record.updated_at);
 
   const reviews = selectedCase.reviews || [];
   const hasReview = reviews.length > 0;
@@ -114,23 +142,22 @@ export const CaseDetailPage: React.FC = () => {
             {selectedCase.chief_complaint || `Case ${selectedCase.case_number || selectedCase.id.slice(0, 8)}`}
           </h1>
           <p className="mt-1 text-xs text-gray-500">
-            Patient ID: <span className="font-mono font-bold text-gray-700">{selectedCase.patient_id || "ANON-SHA256"}</span> &bull;
+            Patient record: <span className="font-mono font-bold text-gray-700">{selectedCase.patient_id}</span> &bull;
             Created: {new Date(selectedCase.created_at).toLocaleString()}
           </p>
         </div>
 
         {/* Inference Action Toolbar */}
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as ModelType)}
-            className="rounded-xl border border-gray-200 bg-gray-50/75 px-3 py-2 text-xs font-bold text-gray-800 focus:border-primary-500 focus:outline-none"
+          <button
+            type="button"
+            onClick={handleReportPreview}
+            disabled={isLoadingReport}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-xs font-bold text-gray-800 hover:bg-gray-50 disabled:opacity-50"
           >
-            <option value={ModelType.MULTIMODAL_LATE_FUSION}>Multimodal Gated Late Fusion</option>
-            <option value={ModelType.IMAGE_DENSENET}>Chest X-Ray DenseNet-121</option>
-            <option value={ModelType.TABULAR_MLP}>Tabular Telemetry MLP</option>
-          </select>
-
+            {isLoadingReport ? <LoadingSpinner size="sm" className="p-0" /> : <FileText className="h-4 w-4" />}
+            Preview report
+          </button>
           <button
             type="button"
             onClick={handleRunPrediction}
@@ -142,44 +169,83 @@ export const CaseDetailPage: React.FC = () => {
             ) : (
               <>
                 <Zap className="h-4 w-4" />
-                Run AI Diagnostic Inference
+                Run model inference
               </>
             )}
           </button>
         </div>
       </div>
 
-      {/* Main Multimodal Dual-Pane Workspace */}
+      {reportError && (
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          Could not generate the report preview: {reportError}
+        </div>
+      )}
+      {reportPreview && (
+        <CaseReportPreviewPanel report={reportPreview} onClose={() => setReportPreview(null)} />
+      )}
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"
+        >
+          <div className="font-semibold">Inference or case request failed</div>
+          <p className="mt-1">{error}</p>
+        </div>
+      )}
+
+      {!activePrediction && selectedCase.predictions.length > 0 && !isPredicting && (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          A saved prediction exists, but its recorded input version does not match the
+          current case inputs or predates input-version tracking. It is hidden to avoid
+          presenting an unverified result as current.
+        </div>
+      )}
+
+      {/* Case input workspace */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Pane: Radiograph / Grad-CAM */}
+        {/* Image input and any stored attribution */}
         <div className="space-y-4">
           {primaryImage ? (
             <RadiographViewer
               image={primaryImage}
+              qualityReport={latestUploadQualityReport}
               visualExplanation={activeExplanation?.visual_explanation}
               predictionId={activePrediction?.id}
+              availablePathologies={activePrediction?.pathology_findings.map((finding) => finding.pathology)}
             />
           ) : (
             <RadiographUploader
               caseId={selectedCase.id}
-              onUploadSuccess={() => loadCase(selectedCase.id)}
+              onUploadSuccess={(_image, report) => {
+                setLatestUploadQualityReport(report);
+                setReportPreview(null);
+                loadCase(selectedCase.id);
+              }}
             />
           )}
         </div>
 
-        {/* Right Pane: Clinical Telemetry / SHAP Attributions */}
+        {/* Structured clinical input and any stored feature attribution */}
         <div className="space-y-4">
-          {activeExplanation?.tabular_explanation ? (
+          {activeExplanation?.tabular_explanation && (
             <ShapWaterfallChart
               tabularExplanation={activeExplanation.tabular_explanation}
             />
-          ) : (
-            <ClinicalDataForm
-              caseId={selectedCase.id}
-              initialData={primaryClinical || undefined}
-              onSuccess={() => loadCase(selectedCase.id)}
-            />
           )}
+          <ClinicalDataForm
+            caseId={selectedCase.id}
+            recordId={primaryClinical?.id}
+            initialData={primaryClinical || undefined}
+            onSuccess={() => {
+              setReportPreview(null);
+              loadCase(selectedCase.id);
+            }}
+          />
         </div>
       </div>
 
@@ -203,7 +269,7 @@ export const CaseDetailPage: React.FC = () => {
         </div>
       )}
 
-      {/* Human-in-the-Loop Clinical Supervisory Audit Section */}
+      {/* Clinician review history */}
       <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-4">
           <div>
@@ -212,16 +278,18 @@ export const CaseDetailPage: React.FC = () => {
               Human-in-the-Loop Clinical Supervisory Reviews ({reviews.length})
             </h3>
             <p className="text-xs text-gray-500">
-              Physician validation audit trail complying with non-autonomous CDSS mandates
+              Review events recorded for this case
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => setIsReviewModalOpen(true)}
+            disabled={!activePrediction}
+            title={!activePrediction ? "A current prediction is required to record a review." : undefined}
             className="rounded-xl bg-gray-900 px-4 py-2 text-xs font-bold text-white hover:bg-gray-800"
           >
-            {hasReview ? "Record Additional Review" : "Sign & Validate Assessment"}
+            {hasReview ? "Record another review" : "Record clinician review"}
           </button>
         </div>
 
@@ -230,15 +298,15 @@ export const CaseDetailPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Physician Review Modal */}
-      {id && (
+      {/* Review modal is available only for a current stored prediction. */}
+      {id && activePrediction && (
         <ReviewSubmissionModal
           isOpen={isReviewModalOpen}
           onClose={() => setIsReviewModalOpen(false)}
           caseId={id}
           predictionId={activePrediction?.id}
-          existingReview={reviews[0] || null}
           onReviewSubmitted={() => {
+            setReportPreview(null);
             loadCase(id);
           }}
         />

@@ -1,16 +1,10 @@
-"""
-MedFusion AI — Explainability (XAI) Pydantic Schemas.
+"""Schemas for optional stored model-attribution artifacts.
 
-Defines comprehensive request and response contracts for:
-- Grad-CAM visual saliency heatmaps and bounding attention regions
-- Tabular SHAP feature attribution waterfall and impact analysis
-- Multimodal attribution fusing radiograph visual cues and clinical parameters
-- On-demand pathology saliency recalculation
-- Mandatory non-autonomous CDSS regulatory disclaimers
+These contracts do not imply that artifacts are available or clinically validated.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,10 +12,8 @@ from app.schemas.prediction import ModalityGatingDetail
 
 
 CLINICAL_DISCLAIMER_TEXT = (
-    "MedFusion AI is an assistive Clinical Decision Support System (CDSS) and does not provide "
-    "autonomous medical diagnosis. Visual saliency heatmaps, attention regions, and SHAP feature "
-    "attributions indicate statistical model correlations and must be reviewed and verified by "
-    "a qualified, licensed healthcare professional in conjunction with full patient clinical history."
+    "This is an engineering prototype without demonstrated clinical validation. Any stored attribution "
+    "is a model-derived artifact, not a diagnosis, causal explanation, or verified disease localization."
 )
 
 
@@ -31,14 +23,14 @@ class FeatureAttributionItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     feature_name: str = Field(description="Raw clinical feature key (e.g. resting_bp, st_depression)")
-    display_name: str = Field(description="Clinician-friendly feature name with units")
+    display_name: str = Field(description="Display label for the stored feature key; units may be unspecified")
     feature_value: Optional[Any] = Field(None, description="Patient's observed value")
-    baseline_reference: Optional[str] = Field(None, description="Standard clinical reference range")
+    baseline_reference: Optional[str] = Field(None, description="Optional stored baseline label; not inferred from clinical guidance")
     shap_value: float = Field(description="Raw SHAP contribution value (log-odds / probability impact)")
     importance_rank: int = Field(ge=1, description="Rank ordered by absolute impact magnitude")
     direction: str = Field(description="'risk_increasing' if SHAP > 0, else 'risk_decreasing'")
     percentage_impact: float = Field(ge=0.0, le=100.0, description="Relative percentage contribution to total attribution")
-    clinical_interpretation: Optional[str] = Field(None, description="Contextual interpretation of feature contribution")
+    clinical_interpretation: Optional[str] = Field(None, description="Optional stored text; not a clinical interpretation")
 
 
 class FeatureAttributionsResponse(BaseModel):
@@ -49,8 +41,8 @@ class FeatureAttributionsResponse(BaseModel):
     prediction_id: UUID
     case_id: Optional[UUID] = None
     model_type: str = Field(description="Model used for evaluation")
-    base_value: float = Field(description="Baseline expected probability across population")
-    predicted_risk: float = Field(description="Final calibrated probability for the patient")
+    base_value: float = Field(description="Stored attribution baseline; provenance and clinical meaning must be established separately")
+    predicted_risk: float = Field(description="Stored model output probability; calibration is not validated by this service")
     total_features_evaluated: int = Field(ge=0)
     top_risk_increasing_features: List[FeatureAttributionItem] = Field(default_factory=list)
     top_risk_decreasing_features: List[FeatureAttributionItem] = Field(default_factory=list)
@@ -60,7 +52,7 @@ class FeatureAttributionsResponse(BaseModel):
 
 
 class AttentionRegion(BaseModel):
-    """High-attention anatomical or pathological bounding box derived from Grad-CAM saliency."""
+    """Optional region associated with an attribution artifact; not a disease localization."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,7 +65,7 @@ class AttentionRegion(BaseModel):
 
 
 class VisualExplanationResponse(BaseModel):
-    """Visual Grad-CAM saliency map and attention metadata."""
+    """Optional visual-attribution artifact and related metadata."""
 
     model_config = ConfigDict(from_attributes=True)
 

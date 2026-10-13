@@ -3,12 +3,12 @@
  *
  * Provides type contracts matching the backend FastAPI Pydantic models:
  * - Authentication & RBAC User models
- * - De-identified Patient records (SHA-256 hashed MRN)
+ * - Patient records and identifiers
  * - Diagnostic Cases & Lifecycle Statuses
  * - Radiograph Image Metadata & Quality Metrics
  * - Tabular Clinical Records (13 standard parameters + validation flags)
- * - AI Multimodal Predictions, Gating, Uncertainty & Safety Abstention
- * - Explainable AI (Grad-CAM heatmaps, Saliency Attention Bounding Boxes, SHAP Waterfall)
+ * - Stored model-output records and optional, unvalidated uncertainty metadata
+ * - Optional stored image/tabular attribution artifacts (not clinical explanations)
  * - Human-in-the-Loop Clinician Review Decisions (Accept, Modify, Reject)
  * - Concordance Analytics & Aggregate Statistics
  */
@@ -49,8 +49,7 @@ export enum CaseStatus {
 export enum ImageType {
   CHEST_XRAY_PA = "chest_xray_pa",
   CHEST_XRAY_AP = "chest_xray_ap",
-  CHEST_CT_AXIAL = "chest_ct_axial",
-  CHEST_CT_CORONAL = "chest_ct_coronal",
+  CHEST_XRAY_LATERAL = "chest_xray_lateral",
   OTHER = "other",
 }
 
@@ -196,7 +195,7 @@ export interface ImageRecord {
 export interface ImageUploadResponse {
   image: ImageRecord;
   quality_report: ImageQualityReport;
-  technical_metadata: Record<string, any>;
+  technical_metadata: Record<string, unknown>;
 }
 
 export interface ImageListResponse {
@@ -224,10 +223,11 @@ export interface ClinicalRecordBase {
   thalassemia: number; // 1 = Normal, 2 = Fixed defect, 3 = Reversible defect
   bmi?: number | null;
   smoking_status?: "never" | "former" | "current" | null;
-  raw_metrics?: Record<string, any>;
+  raw_metrics?: Record<string, unknown>;
 }
 
-export interface ClinicalRecordCreatePayload extends ClinicalRecordBase {}
+export type ClinicalRecordCreatePayload = ClinicalRecordBase;
+export type ClinicalRecordUpdatePayload = Partial<ClinicalRecordBase>;
 
 export interface ClinicalRecord extends ClinicalRecordBase {
   id: string;
@@ -293,6 +293,10 @@ export interface UncertaintyDetail {
 export interface PredictionResponse {
   id: string;
   case_id?: string | null;
+  image_record_id?: string | null;
+  clinical_record_id?: string | null;
+  image_file_hash?: string | null;
+  clinical_record_updated_at?: string | null;
   model_type: ModelType;
   model_version: string;
   primary_condition: string;
@@ -302,7 +306,7 @@ export interface PredictionResponse {
   confidence_band: ConfidenceBand;
   status: PredictionStatus;
   abstention_reason?: string | null;
-  detailed_predictions: Record<string, any>;
+  detailed_predictions: Record<string, unknown>;
   pathology_findings: PathologyDetail[];
   clinical_risk?: TabularRiskDetail | null;
   modality_gating?: ModalityGatingDetail | null;
@@ -322,7 +326,7 @@ export interface CasePredictRequest {
 
 export interface DirectPredictRequest {
   patient_mrn?: string;
-  tabular_features?: Record<string, any>;
+  tabular_features?: Record<string, unknown>;
   generate_explainability?: boolean;
   model_version?: string;
 }
@@ -339,7 +343,7 @@ export interface PredictionListResponse {
 export interface FeatureAttributionItem {
   feature_name: string;
   display_name: string;
-  feature_value?: any;
+  feature_value?: unknown;
   baseline_reference?: string | null;
   shap_value: number;
   importance_rank: number;
@@ -389,7 +393,7 @@ export interface ExplainabilityDetail {
   heatmap_base64?: string | null;
   overlay_base64?: string | null;
   shap_values?: Record<string, number> | null;
-  top_features?: Array<Record<string, any>> | null;
+  top_features?: Array<Record<string, unknown>> | null;
   summary_text?: string | null;
 }
 
@@ -451,6 +455,22 @@ export interface ClinicalReviewResponse {
   clinical_disclaimer: string;
 }
 
+export interface AuditEvent {
+  id: string;
+  user_id?: string | null;
+  action: string;
+  resource_type: string;
+  resource_id?: string | null;
+  timestamp: string;
+}
+
+export interface AuditEventListResponse {
+  total: number;
+  skip: number;
+  limit: number;
+  items: AuditEvent[];
+}
+
 export interface ClinicalReviewListResponse {
   total: number;
   items: ClinicalReviewResponse[];
@@ -510,12 +530,129 @@ export interface DiagnosticCase extends CaseBase {
   updated_at: string;
 }
 
+export interface ImageRecordSummary {
+  id: string;
+  image_type: ImageType;
+  original_filename: string;
+  file_size_bytes: number;
+  file_hash: string;
+  mime_type: string;
+  width?: number | null;
+  height?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ClinicalRecordFormData = Partial<
+  Record<
+    | "age"
+    | "sex"
+    | "chest_pain_type"
+    | "resting_bp"
+    | "cholesterol"
+    | "fasting_bs"
+    | "resting_ecg"
+    | "max_hr"
+    | "exercise_angina"
+    | "st_depression"
+    | "st_slope"
+    | "num_major_vessels"
+    | "thalassemia",
+    number | null
+  >
+>;
+
+export type ClinicalRecordSummary = ClinicalRecordFormData & {
+  id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export interface CaseReviewSummary {
+  id: string;
+  reviewer_id: string;
+  decision: ReviewDecision;
+  modified_diagnosis?: string | null;
+  clinical_notes: string;
+  reviewed_at: string;
+}
+
 export interface DiagnosticCaseDetail extends DiagnosticCase {
   patient?: Patient | null;
-  images: ImageRecord[];
-  clinical_records: ClinicalRecord[];
+  images: ImageRecordSummary[];
+  clinical_records: ClinicalRecordSummary[];
   predictions: PredictionResponse[];
-  reviews: ClinicalReviewResponse[];
+  reviews: CaseReviewSummary[];
+}
+
+export interface CaseReportPreview {
+  case_id: string;
+  case_reference: string;
+  generated_at: string;
+  status: "DRAFT" | "PENDING_REVIEW";
+  modality: CaseModality;
+  patient: { age?: number | null; sex: string };
+  image_input?: {
+    id: string;
+    image_type: ImageType;
+    mime_type: string;
+    sha256: string;
+    width?: number | null;
+    height?: number | null;
+    created_at: string;
+  } | null;
+  clinical_input?: {
+    id: string;
+    updated_at: string;
+    age_years: number;
+    sex_code: number;
+    chest_pain_type: number;
+    resting_bp_mm_hg: number;
+    cholesterol_mg_dl: number;
+    fasting_bs: number;
+    resting_ecg: number;
+    max_hr_bpm: number;
+    exercise_angina: number;
+    st_depression_mm: number;
+    st_slope: number;
+    num_major_vessels: number;
+    thalassemia: number;
+    bmi?: number | null;
+    smoking_status?: string | null;
+  } | null;
+  prediction?: {
+    id: string;
+    model_type: string;
+    model_version: string;
+    model_reported_finding: string;
+    raw_score: number;
+    stored_probability: number;
+    confidence_score: number;
+    confidence_band: string;
+    status: string;
+    abstention_reason?: string | null;
+    image_record_id?: string | null;
+    image_sha256?: string | null;
+    clinical_record_id?: string | null;
+    clinical_record_updated_at?: string | null;
+    input_version_current: boolean;
+    explanation_id?: string | null;
+    explanation_type?: string | null;
+    created_at: string;
+  } | null;
+  review?: {
+    id: string;
+    prediction_id: string;
+    reviewer_id: string;
+    reviewer_role?: string | null;
+    decision: ReviewDecision;
+    modified_diagnosis?: string | null;
+    rationale: string;
+    reviewed_at: string;
+  } | null;
+  free_text_notes_included: boolean;
+  probability_notice: string;
+  disclaimer: string;
 }
 
 export interface CaseListResponse {

@@ -200,3 +200,37 @@ async def test_patient_rbac_enforcement(client: AsyncClient, db_session: AsyncSe
         headers=auditor_headers,
     )
     assert res_forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_patient_records_are_scoped_to_the_creator(client: AsyncClient):
+    """A different authenticated clinician cannot read or edit a patient's data."""
+    owner_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.owner@hospital.org')}"
+    }
+    other_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.other@hospital.org')}"
+    }
+    create_res = await client.post(
+        "/api/v1/patients",
+        json={"mrn": "MRN-OWNER-SCOPE-001", "age": 52, "sex": "female"},
+        headers=owner_headers,
+    )
+    assert create_res.status_code == 201
+    patient_id = create_res.json()["id"]
+
+    assert (await client.get(f"/api/v1/patients/{patient_id}", headers=other_headers)).status_code == 404
+    assert (await client.get("/api/v1/patients", headers=other_headers)).json()["total"] == 0
+    assert (
+        await client.get(
+            "/api/v1/patients/search/mrn?mrn=MRN-OWNER-SCOPE-001",
+            headers=other_headers,
+        )
+    ).status_code == 404
+    assert (
+        await client.patch(
+            f"/api/v1/patients/{patient_id}",
+            json={"age": 53},
+            headers=other_headers,
+        )
+    ).status_code == 404

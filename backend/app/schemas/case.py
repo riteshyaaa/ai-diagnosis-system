@@ -6,15 +6,15 @@ demographic filtering, multi-modal linkages, and full relational graph responses
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.diagnostic_case import CaseModality, CaseStatus
 from app.models.image_record import ImageType
-from app.models.prediction_record import ConfidenceBand, ModelType, PredictionStatus
 from app.models.clinical_review import ReviewDecision
 from app.schemas.patient import PatientResponse
+from app.schemas.prediction import PredictionResponse
 
 
 # --- Subordinate Entity Summary Schemas ---
@@ -26,13 +26,13 @@ class ImageRecordSummary(BaseModel):
     id: UUID
     image_type: ImageType
     original_filename: str
-    file_path: str
     file_size_bytes: int
     file_hash: str
     mime_type: str
     width: Optional[int] = None
     height: Optional[int] = None
     created_at: datetime
+    updated_at: datetime
 
 
 class ClinicalRecordSummary(BaseModel):
@@ -54,38 +54,7 @@ class ClinicalRecordSummary(BaseModel):
     num_major_vessels: Optional[int] = None
     thalassemia: Optional[int] = None
     created_at: datetime
-
-
-class ExplanationSummary(BaseModel):
-    """Compact summary of XAI visual heatmap or feature attributions."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    explanation_type: str
-    heatmap_path: Optional[str] = None
-    shap_values: Optional[Dict[str, Any]] = None
-    top_features: Optional[List[Dict[str, Any]]] = None
-    summary_text: Optional[str] = None
-    created_at: datetime
-
-
-class PredictionSummary(BaseModel):
-    """Compact summary of an AI inference result and uncertainty metrics."""
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    model_type: ModelType
-    model_version: str
-    primary_condition: str
-    raw_probability: float
-    calibrated_probability: float
-    confidence_score: float
-    confidence_band: ConfidenceBand
-    status: PredictionStatus
-    detailed_predictions: Optional[Dict[str, float]] = None
-    inference_latency_ms: Optional[float] = None
-    explanation: Optional[ExplanationSummary] = None
-    created_at: datetime
+    updated_at: datetime
 
 
 class ReviewSummary(BaseModel):
@@ -170,7 +139,7 @@ class CaseDetailResponse(CaseResponse):
     patient: Optional[PatientResponse] = None
     images: List[ImageRecordSummary] = []
     clinical_records: List[ClinicalRecordSummary] = []
-    predictions: List[PredictionSummary] = []
+    predictions: List[PredictionResponse] = Field(default_factory=list)
     reviews: List[ReviewSummary] = []
 
 

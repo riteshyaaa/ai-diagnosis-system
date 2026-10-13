@@ -85,7 +85,7 @@ async def list_case_images(
 ) -> ImageListResponse:
     """List images for a case."""
     service = ImageRecordService(session)
-    return await service.list_case_images(case_id=case_id)
+    return await service.list_case_images(case_id=case_id, viewer_id=current_user.id)
 
 
 @router.get(
@@ -127,7 +127,11 @@ async def serve_image_file(
 ):
     """Serve image file content."""
     service = ImageRecordService(session)
-    file_path = await service.get_image_file_path(image_id=image_id, variant=variant)
+    file_path = await service.get_image_file_path(
+        image_id=image_id,
+        variant=variant,
+        viewer_id=current_user.id,
+    )
 
     media_type = "image/png"
     if file_path.suffix.lower() in [".jpg", ".jpeg"]:

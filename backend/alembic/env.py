@@ -32,7 +32,10 @@ target_metadata = Base.metadata
 
 # Inject database URL from application settings
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+database_url = settings.effective_database_url
+# ConfigParser treats percent signs as interpolation markers. URL-encoded
+# credentials and SQLite paths therefore need escaping in Alembic's config.
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
@@ -70,7 +73,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode using AsyncEngine."""
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.database_url
+    configuration["sqlalchemy.url"] = database_url
 
     connectable = async_engine_from_config(
         configuration,

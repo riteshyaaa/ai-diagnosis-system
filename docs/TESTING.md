@@ -5,16 +5,16 @@
 - `tests/unit/` contains backend, image-processing, model, registry, and inference tests.
 - `tests/integration/` contains FastAPI authentication, patient/case, upload, prediction, review, and explanation tests.
 - `tests/e2e/` contains one Python workflow test. It is not a browser-driven Playwright/Cypress suite.
-- No frontend component or browser test files were found. `frontend/package.json` defines Vitest scripts, but a script alone is not a test suite.
+- Frontend Vitest covers registration payload/accessibility, case service URL behavior, and case-store behavior. No browser-driven Playwright/Cypress suite exists.
 
-The repository currently contains no trained checkpoints or real evaluation datasets. Prediction/end-to-end tests assert explicit unavailability rather than substitute random initialized models. Explanation and prediction-dependent review integration tests skip with a reason until all three registered model checkpoint files exist; tests that do not require predictions remain runnable.
+The checked-in registry has no active model version and there are no verified evaluation datasets. Prediction tests assert explicit unavailability rather than substitute random initialized models. Explanation and prediction-dependent review integration tests skip because promoted, present checkpoints are not available; local ignored artifacts do not count as verified model evidence.
 
 ## Commands
 
 Run from the repository root after installing Python dependencies:
 
-```bash
-pytest -q
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 The pytest configuration points to `tests/` and adds `backend/` to the import path. Test dependencies are declared in the backend development requirements; ML dependencies are declared separately under `ml/requirements.txt`.
@@ -28,22 +28,24 @@ npm run lint
 npm run test -- --run
 ```
 
-The test command is expected to report no tests until frontend test files are added.
+The frontend Vitest suite contains 12 tests across 6 files, including a stale-output/report-preview component check. Production configuration checks are in `tests/unit/test_config.py` and include credential-redaction coverage. `tests/unit/test_repositories.py` checks that audit persistence drops diagnosis text, clinical notes, case numbers, and unknown detail values. `tests/integration/test_case_report_api.py` checks draft/current/stale report behavior, ownership, identifier omission, and preview audit events.
 
 ## Verification in the audit environment
 
 | Command/check | Result |
 |---|---|
-| `pytest -q` | **Blocked before collection:** `pytest: command not found`. |
-| `cd frontend && npm run build` | **Blocked before type checking:** `tsc: not found`; no `node_modules/` directory. |
-| Python dependency probe | **Blocked:** FastAPI, Pydantic, SQLAlchemy, PyTorch, NumPy, and test dependencies are absent. |
-| Frontend dependency probe | **Blocked:** frontend dependencies are not installed. |
-| BOM-aware Python syntax check | **Passed:** 144 Python source/test files parsed without importing project dependencies. |
-| Registry JSON/safety check | **Passed:** all 6 JSON files parse; the three model entries have no active checkpoint, unsupported metrics, or checksum claim. |
-| Docker Compose config | **Blocked:** repository-root `.env` is absent and referenced by the Compose service configuration. |
-| Docker daemon/build | **Blocked:** Docker CLI cannot connect to `/var/run/docker.sock`; no services were started. |
+| `.venv\Scripts\python.exe -m pytest -q` | **Passed:** 177 passed, 14 skipped, 0 failed (191 collected); 30 warnings. Skips are model-dependent and require unavailable verified artifacts. |
+| `cd frontend && npm run lint` | **Passed.** |
+| `cd frontend && npm run build` | **Passed:** TypeScript and Vite build. Vite reports a roughly 832 kB minified JS chunk. |
+| `cd frontend && npm test -- --run` | **Passed:** 6 files, 12 tests. |
+| Focused Ruff `E9,F` checks on `backend/app/config.py` and `tests/unit/test_config.py` | **Passed.** Broad Ruff remains unresolved. |
+| Mypy | **Unresolved:** previous run failed parsing installed NumPy stubs against the configured Python target; not rerun. |
+| Docker Compose build/start | **Blocked:** Docker Desktop engine pipe unavailable; no containers built or started. |
+| Alembic migrations | **Passed:** new revisions were applied/checked by migration tests against disposable SQLite databases; PostgreSQL migration execution is unverified. |
+| Production settings | **Passed:** all 16 focused configuration tests pass, including checks that rejected database credentials are not included in the error message and that an empty URL derives the Compose database URL from components. Environment-variable loading was also smoke-checked with `_env_file=None`. |
+| Compose YAML | **Passed:** parsed statically with PyYAML. Compose build/start remains unverified because Docker Desktop is unavailable. |
 
-No tests or builds are claimed to pass in this environment. After setting up dependencies, record complete command output and fix test failures before merging.
+Tests did not use the local `.env`, local `medfusion.db`, ignored model artifacts, or patient records. Both development servers are stopped.
 
 ## Coverage and CI
 

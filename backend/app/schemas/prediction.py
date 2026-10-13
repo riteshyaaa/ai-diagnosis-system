@@ -1,15 +1,7 @@
-"""
-MedFusion AI — AI Prediction & Inference Pydantic Schemas.
+"""Request and response contracts for stored model outputs.
 
-Defines request and response data contracts for:
-- Case-triggered multimodal/unimodal AI inference
-- Real-time standalone inference evaluation
-- Diagnostic multi-pathology probabilities and confidence bands
-- Calibrated cardiovascular risk predictions
-- Modality fusion gating weights
-- Clinical uncertainty quantification & safety abstention
-- Explainability artifact references (Grad-CAM heatmaps, SHAP contributions)
-- Non-autonomous CDSS regulatory disclaimers
+Field names preserve the current API schema. They do not establish model validity,
+calibration, clinical uncertainty, or a safety-validated abstention policy.
 """
 
 from datetime import datetime
@@ -29,24 +21,24 @@ class PathologyDetail(BaseModel):
     probability: float = Field(ge=0.0, le=1.0, description="Model prediction probability")
     threshold: float = Field(default=0.5, description="Decision threshold applied")
     positive: bool = Field(description="Flag indicating if probability exceeds decision threshold")
-    confidence_band: str = Field(description="Calibrated confidence band (high, moderate, low, abstain)")
+    confidence_band: str = Field(description="Reported model band; calibration and clinical meaning are not validated")
     calibrated_probability: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 class TabularRiskDetail(BaseModel):
-    """Clinical risk prediction detail derived from structured EHR telemetry."""
+    """Stored tabular model-output fields; not a validated clinical risk estimate."""
 
     model_config = ConfigDict(from_attributes=True)
 
     raw_probability: float = Field(ge=0.0, le=1.0, description="Raw uncalibrated risk probability")
-    calibrated_probability: float = Field(ge=0.0, le=1.0, description="Isotonic/Platt calibrated risk probability")
+    calibrated_probability: float = Field(ge=0.0, le=1.0, description="Stored output field; calibrator provenance and calibration are not verified")
     risk_tier: str = Field(description="Clinical risk tier (low, moderate, high, critical)")
-    confidence_band: str = Field(description="Calibrated confidence band")
+    confidence_band: str = Field(description="Reported model band; calibration is not verified")
     positive: bool = Field(description="Flag indicating clinical risk threshold exceeded")
 
 
 class ModalityGatingDetail(BaseModel):
-    """Modality contribution weights learned during multimodal late fusion."""
+    """Stored modality contribution fields; training provenance is not established."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -56,16 +48,16 @@ class ModalityGatingDetail(BaseModel):
 
 
 class UncertaintyDetail(BaseModel):
-    """Comprehensive uncertainty assessment and clinical safety abstention metrics."""
+    """Stored uncertainty-related model fields; thresholds are not clinically validated."""
 
     model_config = ConfigDict(from_attributes=True)
 
     entropy: float = Field(ge=0.0, description="Information entropy across predicted distributions")
-    confidence_score: float = Field(ge=0.0, le=1.0, description="Overall calibrated confidence score")
+    confidence_score: float = Field(ge=0.0, le=1.0, description="Reported score; calibration and clinical meaning are not validated")
     confidence_band: str = Field(description="Confidence classification (high, moderate, low, abstain)")
     cross_modal_conflict: Optional[float] = Field(None, ge=0.0, le=1.0, description="Discordance between modalities")
-    abstention_recommended: bool = Field(default=False, description="Flag indicating model abstention from asserting diagnosis")
-    abstention_reasons: List[str] = Field(default_factory=list, description="Clinical safety reasons for abstention")
+    abstention_recommended: bool = Field(default=False, description="Stored model abstention flag; not a validated safety control")
+    abstention_reasons: List[str] = Field(default_factory=list, description="Stored model-provided abstention reasons")
 
 
 class ExplainabilityDetail(BaseModel):
@@ -87,7 +79,7 @@ class CasePredictRequest(BaseModel):
     """Request payload to trigger AI inference on an existing diagnostic case."""
 
     model_version: Optional[str] = Field(None, description="Target model version (e.g. 1.0.0); defaults to active")
-    generate_explainability: bool = Field(default=True, description="Whether to compute Grad-CAM and SHAP artifacts")
+    generate_explainability: bool = Field(default=True, description="Request optional attribution artifacts when supported by an available model")
     selected_image_id: Optional[UUID] = Field(None, description="Specific image ID to evaluate; defaults to primary")
     selected_clinical_record_id: Optional[UUID] = Field(None, description="Specific clinical record to evaluate; defaults to latest")
 
@@ -95,9 +87,9 @@ class CasePredictRequest(BaseModel):
 class DirectPredictRequest(BaseModel):
     """Request payload for direct real-time inference without prior case persistence."""
 
-    patient_mrn: Optional[str] = Field(None, description="Patient MRN (automatically hashed with SHA-256)")
+    patient_mrn: Optional[str] = Field(None, description="Patient MRN (stored as an unkeyed SHA-256 digest; not de-identification)")
     tabular_features: Optional[Dict[str, Any]] = Field(None, description="Structured clinical parameters")
-    generate_explainability: bool = Field(default=True, description="Whether to compute Grad-CAM and SHAP artifacts")
+    generate_explainability: bool = Field(default=True, description="Request optional attribution artifacts when supported by an available model")
     model_version: Optional[str] = Field(None, description="Target model version")
 
 
@@ -108,12 +100,28 @@ class PredictionResponse(BaseModel):
 
     id: UUID
     case_id: Optional[UUID] = None
+    image_record_id: Optional[UUID] = Field(
+        None, description="Image record used by this inference run"
+    )
+    clinical_record_id: Optional[UUID] = Field(
+        None, description="Clinical record used by this inference run"
+    )
+    image_file_hash: Optional[str] = Field(
+        None, description="SHA-256 of the image bytes used by this inference run"
+    )
+    clinical_record_updated_at: Optional[datetime] = Field(
+        None, description="Version timestamp of the clinical record used"
+    )
     model_type: ModelType
     model_version: str
     primary_condition: str
     raw_probability: float
-    calibrated_probability: float
-    confidence_score: float
+    calibrated_probability: float = Field(
+        description="Stored model output field; calibration is not verified"
+    )
+    confidence_score: float = Field(
+        description="Reported score; calibration and clinical meaning are not validated"
+    )
     confidence_band: ConfidenceBand
     status: PredictionStatus
     abstention_reason: Optional[str] = None
@@ -125,9 +133,7 @@ class PredictionResponse(BaseModel):
     inference_latency_ms: float
     explanation: Optional[ExplainabilityDetail] = None
     clinical_disclaimer: str = (
-        "MedFusion AI is an assistive Clinical Decision Support System (CDSS) for licensed "
-        "healthcare professionals. It does not provide autonomous medical diagnosis. "
-        "All predictions require human-in-the-loop clinical review and validation."
+        "Engineering prototype without demonstrated clinical validation. Do not use to guide diagnosis, triage, or treatment."
     )
     created_at: datetime
 

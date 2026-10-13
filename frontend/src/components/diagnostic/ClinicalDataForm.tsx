@@ -1,382 +1,278 @@
-/**
- * MedFusion AI — 13-Parameter Clinical Telemetry Ingestion Form
- */
-
 import React, { useState } from "react";
-import { Activity, AlertTriangle, Check, Sparkles } from "lucide-react";
+import { Activity, AlertTriangle, Check } from "lucide-react";
+
 import { clinicalRecordService } from "../../services/clinical-records.service";
-import { ClinicalRecord, ClinicalRecordCreatePayload } from "../../types";
+import type {
+  ClinicalRecord,
+  ClinicalRecordCreatePayload,
+  ClinicalRecordFormData,
+} from "../../types";
+import { apiErrorMessage } from "../../utils/apiError";
 import { LoadingSpinner } from "../common/LoadingSpinner";
+
+type ClinicalField =
+  | "age"
+  | "sex"
+  | "chest_pain_type"
+  | "resting_bp"
+  | "cholesterol"
+  | "fasting_bs"
+  | "resting_ecg"
+  | "max_hr"
+  | "exercise_angina"
+  | "st_depression"
+  | "st_slope"
+  | "num_major_vessels"
+  | "thalassemia";
+
+type ClinicalFormValues = Record<ClinicalField, string>;
+
+type Choice = { value: string; label: string };
+type FieldDefinition =
+  | {
+      key: ClinicalField;
+      label: string;
+      kind: "number";
+      min: number;
+      max: number;
+      step?: number;
+    }
+  | { key: ClinicalField; label: string; kind: "select"; choices: Choice[] };
+
+const fields: FieldDefinition[] = [
+  { key: "age", label: "Age (years)", kind: "number", min: 1, max: 120 },
+  {
+    key: "sex",
+    label: "Biological sex code",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: Female" },
+      { value: "1", label: "1: Male" },
+    ],
+  },
+  {
+    key: "chest_pain_type",
+    label: "Chest pain type code",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: Typical angina" },
+      { value: "1", label: "1: Atypical angina" },
+      { value: "2", label: "2: Non-anginal pain" },
+      { value: "3", label: "3: Asymptomatic" },
+    ],
+  },
+  { key: "resting_bp", label: "Resting blood pressure (mmHg)", kind: "number", min: 50, max: 260 },
+  { key: "cholesterol", label: "Cholesterol (mg/dL)", kind: "number", min: 80, max: 600 },
+  {
+    key: "fasting_bs",
+    label: "Fasting blood sugar over 120 mg/dL",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: No" },
+      { value: "1", label: "1: Yes" },
+    ],
+  },
+  {
+    key: "resting_ecg",
+    label: "Resting ECG code",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: Normal" },
+      { value: "1", label: "1: ST-T abnormality" },
+      { value: "2", label: "2: Left ventricular hypertrophy" },
+    ],
+  },
+  { key: "max_hr", label: "Maximum heart rate (bpm)", kind: "number", min: 40, max: 240 },
+  {
+    key: "exercise_angina",
+    label: "Exercise-induced angina",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: No" },
+      { value: "1", label: "1: Yes" },
+    ],
+  },
+  { key: "st_depression", label: "ST depression (mm)", kind: "number", min: -2, max: 8, step: 0.1 },
+  {
+    key: "st_slope",
+    label: "ST slope code",
+    kind: "select",
+    choices: [
+      { value: "0", label: "0: Upsloping" },
+      { value: "1", label: "1: Flat" },
+      { value: "2", label: "2: Downsloping" },
+    ],
+  },
+  {
+    key: "num_major_vessels",
+    label: "Major vessels (0 to 3)",
+    kind: "select",
+    choices: [0, 1, 2, 3].map((value) => ({
+      value: String(value),
+      label: String(value),
+    })),
+  },
+  {
+    key: "thalassemia",
+    label: "Thalassemia code",
+    kind: "select",
+    choices: [
+      { value: "1", label: "1: Normal" },
+      { value: "2", label: "2: Fixed defect" },
+      { value: "3", label: "3: Reversible defect" },
+    ],
+  },
+];
+
+function toFormValues(initialData?: ClinicalRecordFormData): ClinicalFormValues {
+  return Object.fromEntries(
+    fields.map(({ key }) => [key, initialData?.[key] == null ? "" : String(initialData[key])]),
+  ) as ClinicalFormValues;
+}
+
+function toPayload(values: ClinicalFormValues): ClinicalRecordCreatePayload {
+  const number = (key: ClinicalField) => Number(values[key]);
+  return {
+    age: number("age"),
+    sex: number("sex"),
+    chest_pain_type: number("chest_pain_type"),
+    resting_bp: number("resting_bp"),
+    cholesterol: number("cholesterol"),
+    fasting_bs: number("fasting_bs"),
+    resting_ecg: number("resting_ecg"),
+    max_hr: number("max_hr"),
+    exercise_angina: number("exercise_angina"),
+    st_depression: number("st_depression"),
+    st_slope: number("st_slope"),
+    num_major_vessels: number("num_major_vessels"),
+    thalassemia: number("thalassemia"),
+  };
+}
 
 interface ClinicalDataFormProps {
   caseId?: string;
+  recordId?: string;
   onSuccess: (record: ClinicalRecord) => void;
-  initialData?: Partial<ClinicalRecordCreatePayload>;
+  initialData?: ClinicalRecordFormData;
 }
 
 export const ClinicalDataForm: React.FC<ClinicalDataFormProps> = ({
   caseId,
+  recordId,
   onSuccess,
   initialData,
 }) => {
-  const [formData, setFormData] = useState<ClinicalRecordCreatePayload>({
-    age: initialData?.age ?? 58,
-    sex: initialData?.sex ?? 1,
-    chest_pain_type: initialData?.chest_pain_type ?? 2,
-    resting_bp: initialData?.resting_bp ?? 140,
-    cholesterol: initialData?.cholesterol ?? 245,
-    fasting_bs: initialData?.fasting_bs ?? 0,
-    resting_ecg: initialData?.resting_ecg ?? 1,
-    max_hr: initialData?.max_hr ?? 150,
-    exercise_angina: initialData?.exercise_angina ?? 0,
-    st_depression: initialData?.st_depression ?? 1.5,
-    st_slope: initialData?.st_slope ?? 1,
-    num_major_vessels: initialData?.num_major_vessels ?? 1,
-    thalassemia: initialData?.thalassemia ?? 2,
-  });
-
+  const [formValues, setFormValues] = useState(() => toFormValues(initialData));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleChange = (field: keyof ClinicalRecordCreatePayload, value: number) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const applyPreset = (preset: "normal" | "elevated" | "critical") => {
-    if (preset === "normal") {
-      setFormData((prev) => ({
-        ...prev,
-        age: 42,
-        sex: 0,
-        chest_pain_type: 0,
-        resting_bp: 118,
-        cholesterol: 185,
-        fasting_bs: 0,
-        resting_ecg: 0,
-        max_hr: 168,
-        exercise_angina: 0,
-        st_depression: 0.0,
-        st_slope: 0,
-        num_major_vessels: 0,
-        thalassemia: 1,
-      }));
-    } else if (preset === "elevated") {
-      setFormData((prev) => ({
-        ...prev,
-        age: 62,
-        sex: 1,
-        chest_pain_type: 2,
-        resting_bp: 145,
-        cholesterol: 260,
-        fasting_bs: 1,
-        resting_ecg: 1,
-        max_hr: 135,
-        exercise_angina: 1,
-        st_depression: 2.2,
-        st_slope: 1,
-        num_major_vessels: 2,
-        thalassemia: 2,
-      }));
-    } else {
-      setFormData((prev) => ({
-        ...prev,
-        age: 71,
-        sex: 1,
-        chest_pain_type: 3,
-        resting_bp: 175,
-        cholesterol: 310,
-        fasting_bs: 1,
-        resting_ecg: 2,
-        max_hr: 110,
-        exercise_angina: 1,
-        st_depression: 3.8,
-        st_slope: 2,
-        num_major_vessels: 3,
-        thalassemia: 3,
-      }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!caseId) return;
+    if (fields.some(({ key }) => !formValues[key].trim() || !Number.isFinite(Number(formValues[key])))) {
+      setErrorMessage("Enter every required value using the source record. No values are inferred or filled in.");
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
-
     try {
-      const res = await clinicalRecordService.createRecord(caseId, formData);
-      onSuccess(res.record);
-    } catch (err: any) {
-      setErrorMessage(err?.response?.data?.detail || "Failed to record clinical telemetry.");
+      const payload = toPayload(formValues);
+      const record = recordId
+        ? await clinicalRecordService.updateRecord(recordId, payload)
+        : (await clinicalRecordService.createRecord(caseId, payload)).record;
+      onSuccess(record);
+    } catch (error: unknown) {
+      setErrorMessage(apiErrorMessage(error, "Failed to save clinical record."));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-3">
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-wider text-gray-900 flex items-center gap-1.5">
-            <Activity className="h-4 w-4 text-primary-600" />
-            13-Parameter Clinical Telemetry
-          </h3>
-          <p className="text-xs text-gray-500">
-            Cardiovascular risk markers for Tabular MLP / XGBoost Late Fusion
-          </p>
-        </div>
-
-        {/* Clinical Presets */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-bold text-gray-400 uppercase">Presets:</span>
-          <button
-            type="button"
-            onClick={() => applyPreset("normal")}
-            className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
-          >
-            Normal
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset("elevated")}
-            className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200"
-          >
-            Elevated
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset("critical")}
-            className="rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
-          >
-            High Risk
-          </button>
-        </div>
+    <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div className="border-b border-gray-100 pb-3">
+        <h3 className="flex items-center gap-1.5 text-sm font-bold uppercase tracking-wider text-gray-900">
+          <Activity className="h-4 w-4 text-primary-600" />
+          Structured clinical fields
+        </h3>
+        <p className="mt-1 text-xs text-gray-600">
+          Use values from the source record. This prototype does not validate clinical interpretation or generate a diagnosis when data is saved.
+        </p>
       </div>
 
       {errorMessage && (
-        <div className="mt-4 flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-800">
-          <AlertTriangle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+        <div role="alert" className="mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0 text-rose-600" />
           <span>{errorMessage}</span>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {/* Age */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Age (Years)
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {fields.map((field) => (
+            <label key={field.key} className="block text-[11px] font-bold text-gray-700">
+              {field.label}
+              {field.kind === "number" ? (
+                <input
+                  type="number"
+                  min={field.min}
+                  max={field.max}
+                  step={field.step ?? 1}
+                  required
+                  value={formValues[field.key]}
+                  onChange={(event) =>
+                    setFormValues((previous) => ({
+                      ...previous,
+                      [field.key]: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-2 text-xs font-normal text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
+                />
+              ) : (
+                <select
+                  required
+                  value={formValues[field.key]}
+                  onChange={(event) =>
+                    setFormValues((previous) => ({
+                      ...previous,
+                      [field.key]: event.target.value,
+                    }))
+                  }
+                  className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-2 text-xs font-normal text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
+                >
+                  <option value="">Select a value</option>
+                  {field.choices.map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
-            <input
-              type="number"
-              min={1}
-              max={120}
-              required
-              value={formData.age}
-              onChange={(e) => handleChange("age", parseInt(e.target.value) || 0)}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          {/* Sex */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Biological Sex
-            </label>
-            <select
-              value={formData.sex}
-              onChange={(e) => handleChange("sex", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={1}>Male (1)</option>
-              <option value={0}>Female (0)</option>
-            </select>
-          </div>
-
-          {/* Chest Pain Type */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Chest Pain Type
-            </label>
-            <select
-              value={formData.chest_pain_type}
-              onChange={(e) => handleChange("chest_pain_type", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>0: Typical Angina</option>
-              <option value={1}>1: Atypical Angina</option>
-              <option value={2}>2: Non-anginal Pain</option>
-              <option value={3}>3: Asymptomatic</option>
-            </select>
-          </div>
-
-          {/* Resting BP */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Resting BP (mmHg)
-            </label>
-            <input
-              type="number"
-              min={60}
-              max={250}
-              required
-              value={formData.resting_bp}
-              onChange={(e) => handleChange("resting_bp", parseFloat(e.target.value) || 0)}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          {/* Cholesterol */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Serum Chol (mg/dl)
-            </label>
-            <input
-              type="number"
-              min={100}
-              max={600}
-              required
-              value={formData.cholesterol}
-              onChange={(e) => handleChange("cholesterol", parseFloat(e.target.value) || 0)}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          {/* Fasting Blood Sugar */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Fasting BS &gt; 120
-            </label>
-            <select
-              value={formData.fasting_bs}
-              onChange={(e) => handleChange("fasting_bs", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>False (&le; 120 mg/dl)</option>
-              <option value={1}>True (&gt; 120 mg/dl)</option>
-            </select>
-          </div>
-
-          {/* Resting ECG */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Resting ECG
-            </label>
-            <select
-              value={formData.resting_ecg}
-              onChange={(e) => handleChange("resting_ecg", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>0: Normal</option>
-              <option value={1}>1: ST-T Wave Abnormality</option>
-              <option value={2}>2: Left Ventricular Hypertrophy</option>
-            </select>
-          </div>
-
-          {/* Max Heart Rate */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Max HR (bpm)
-            </label>
-            <input
-              type="number"
-              min={50}
-              max={230}
-              required
-              value={formData.max_hr}
-              onChange={(e) => handleChange("max_hr", parseFloat(e.target.value) || 0)}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          {/* Exercise Induced Angina */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Ex. Induced Angina
-            </label>
-            <select
-              value={formData.exercise_angina}
-              onChange={(e) => handleChange("exercise_angina", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>No (0)</option>
-              <option value={1}>Yes (1)</option>
-            </select>
-          </div>
-
-          {/* ST Depression */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              ST Depression
-            </label>
-            <input
-              type="number"
-              step="0.1"
-              min={0}
-              max={10}
-              required
-              value={formData.st_depression}
-              onChange={(e) => handleChange("st_depression", parseFloat(e.target.value) || 0)}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          {/* Slope of ST */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Slope of ST
-            </label>
-            <select
-              value={formData.st_slope}
-              onChange={(e) => handleChange("st_slope", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>0: Upsloping</option>
-              <option value={1}>1: Flat</option>
-              <option value={2}>2: Downsloping</option>
-            </select>
-          </div>
-
-          {/* Major Vessels */}
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-              Major Vessels (0-3)
-            </label>
-            <select
-              value={formData.num_major_vessels}
-              onChange={(e) => handleChange("num_major_vessels", parseInt(e.target.value))}
-              className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
-            >
-              <option value={0}>0 Vessels</option>
-              <option value={1}>1 Vessel</option>
-              <option value={2}>2 Vessels</option>
-              <option value={3}>3 Vessels</option>
-            </select>
-          </div>
+          ))}
         </div>
 
-        <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-          <div className="flex items-center gap-1 text-[11px] text-gray-500">
-            <Sparkles className="h-3.5 w-3.5 text-primary-500" />
-            <span>Valid for both Tabular Risk MLP and Multimodal Fusion</span>
-          </div>
-
+        <div className="flex flex-col gap-3 border-t border-gray-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[11px] text-gray-600">
+            Schema-coded values require confirmation against the original data dictionary.
+          </p>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-primary-700 active:scale-95 disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-primary-700 disabled:opacity-50"
           >
             {isSubmitting ? (
               <LoadingSpinner size="sm" className="p-0 text-white" />
             ) : (
               <>
                 <Check className="h-3.5 w-3.5" />
-                Commit Telemetry Record
+                {recordId ? "Save clinical record" : "Add clinical record"}
               </>
             )}
           </button>
         </div>
       </form>
-    </div>
+    </section>
   );
 };

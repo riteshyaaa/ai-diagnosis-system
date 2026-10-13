@@ -77,6 +77,7 @@ async def list_patients(
     """Query and filter de-identified patients."""
     service = PatientService(session)
     return await service.list_patients(
+        viewer_id=current_user.id,
         sex=sex,
         min_age=min_age,
         max_age=max_age,

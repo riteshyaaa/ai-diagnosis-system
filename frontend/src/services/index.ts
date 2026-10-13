@@ -11,3 +11,4 @@ export * from "./clinical-records.service";
 export * from "./predictions.service";
 export * from "./explanations.service";
 export * from "./reviews.service";
+export * from "./audit.service";

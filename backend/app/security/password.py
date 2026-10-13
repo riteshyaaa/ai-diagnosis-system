@@ -7,7 +7,7 @@ Never store or log plaintext passwords.
 
 import bcrypt
 
-# Work factor: 12 rounds for HIPAA / security compliance
+# Bcrypt work factor; this does not establish regulatory compliance
 BCRYPT_ROUNDS = 12
 
 

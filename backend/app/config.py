@@ -6,9 +6,10 @@ Never hardcode secrets or credentials.
 """
 
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
-from typing import List, Optional
-from urllib.parse import quote_plus
+from typing import Any, List, Optional
+from urllib.parse import quote_plus, unquote, urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -25,6 +26,68 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    def __init__(self, **values: Any) -> None:
+        super().__init__(**values)
+        self._validate_production_configuration()
+
+    def _validate_production_configuration(self) -> None:
+        """Reject development defaults when the app is explicitly in production."""
+        if self.app_env.strip().lower() not in {"prod", "production"}:
+            return
+
+        problems = []
+        if self.debug:
+            problems.append("DEBUG must be false")
+        if self.demo_users_enabled:
+            problems.append("DEMO_USERS_ENABLED must be false")
+
+        secret = self.jwt_secret_key.strip()
+        if len(secret) < 32 or "change_me" in secret.lower():
+            problems.append("SECRET_KEY must be a non-placeholder value of at least 32 characters")
+
+        database = urlsplit(self.effective_database_url)
+        database_host = (database.hostname or "").lower().rstrip(".")
+        try:
+            database_is_loopback = bool(database_host) and ip_address(database_host).is_loopback
+        except ValueError:
+            database_is_loopback = database_host == "localhost"
+        database_username = unquote(database.username or "")
+        database_password = unquote(database.password or "")
+        if database.scheme != "postgresql+asyncpg":
+            problems.append("DATABASE_URL must use PostgreSQL with asyncpg")
+        if not database_host or database_is_loopback:
+            problems.append("DATABASE_URL must name a non-local database host")
+        if (
+            len(database_username) < 8
+            or database_username.lower() in {"medfusion_user", "postgres", "username", "user"}
+            or len(database_password) < 16
+            or "change_me" in database_password.lower()
+            or database_password.lower() in {"changeme", "password", "password123", "your_password"}
+        ):
+            problems.append("DATABASE_URL must contain configured database credentials")
+
+        origins = self.cors_origin_list
+        invalid_origins = False
+        for origin in origins:
+            parsed_origin = urlsplit(origin)
+            if (
+                origin == "*"
+                or parsed_origin.scheme != "https"
+                or not parsed_origin.hostname
+                or parsed_origin.path
+                or parsed_origin.query
+                or parsed_origin.fragment
+                or parsed_origin.username
+                or parsed_origin.password
+            ):
+                invalid_origins = True
+                break
+        if not origins or invalid_origins:
+            problems.append("CORS_ORIGINS must contain explicit HTTPS origins")
+
+        if problems:
+            raise ValueError("Unsafe production configuration: " + "; ".join(problems))
 
     # --- Application ---
     app_name: str = "MedFusion AI"

@@ -3,10 +3,11 @@
  */
 
 import React, { useState } from "react";
-import { CheckCircle, Edit3, XCircle, ShieldAlert, AlertCircle } from "lucide-react";
+import { CheckCircle, Edit3, XCircle, Info, AlertCircle } from "lucide-react";
 import { Modal } from "../common/Modal";
 import { ReviewDecision, ClinicalReviewCreate, ClinicalReviewResponse } from "../../types";
 import { reviewService } from "../../services/reviews.service";
+import { apiErrorMessage } from "../../utils/apiError";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 
 interface ReviewSubmissionModalProps {
@@ -15,7 +16,6 @@ interface ReviewSubmissionModalProps {
   caseId: string;
   predictionId?: string | null;
   onReviewSubmitted: (review: ClinicalReviewResponse) => void;
-  existingReview?: ClinicalReviewResponse | null;
 }
 
 export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
@@ -24,19 +24,10 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
   caseId,
   predictionId,
   onReviewSubmitted,
-  existingReview,
 }) => {
-  const [decision, setDecision] = useState<ReviewDecision>(
-    existingReview?.decision || ReviewDecision.ACCEPT
-  );
-  const [clinicalNotes, setClinicalNotes] = useState<string>(
-    existingReview?.clinical_notes || ""
-  );
-  const [revisedDiagnosis, setRevisedDiagnosis] = useState<string>(
-    existingReview?.modified_diagnosis || ""
-  );
-  const [revisedProbability, setRevisedProbability] = useState<number>(50);
-
+  const [decision, setDecision] = useState<ReviewDecision>(ReviewDecision.ACCEPT);
+  const [clinicalNotes, setClinicalNotes] = useState<string>("");
+  const [revisedDiagnosis, setRevisedDiagnosis] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,8 +41,8 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
       return;
     }
 
-    if (decision === ReviewDecision.REJECT && !clinicalNotes.trim()) {
-      setError("Mandatory clinical rationale required when rejecting AI diagnostic assessment.");
+    if (clinicalNotes.trim().length < 5) {
+      setError("Enter at least five characters of review rationale.");
       return;
     }
 
@@ -60,15 +51,15 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
       const payload: ClinicalReviewCreate = {
         prediction_id: predictionId || null,
         decision,
-        clinical_notes: clinicalNotes.trim() || (decision === ReviewDecision.ACCEPT ? "Clinician accepted AI assessment." : ""),
+        clinical_notes: clinicalNotes.trim(),
         modified_diagnosis: decision === ReviewDecision.MODIFY ? revisedDiagnosis.trim() : null,
       };
 
       const review = await reviewService.submitReview(caseId, payload);
       onReviewSubmitted(review);
       onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to submit clinical validation review.");
+    } catch (error: unknown) {
+      setError(apiErrorMessage(error, "Failed to submit clinical validation review."));
     } finally {
       setIsSubmitting(false);
     }
@@ -78,8 +69,8 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Physician Clinical Review & Validation"
-      subtitle="Mandatory Human-in-the-Loop Supervision & Audit Trail"
+      title="Record Clinician Review"
+      subtitle="Save a review decision and rationale for this prediction"
       maxWidth="lg"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -113,8 +104,8 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
                 className="sr-only"
               />
               <CheckCircle className={`h-6 w-6 ${decision === ReviewDecision.ACCEPT ? "text-emerald-600" : "text-gray-400"}`} />
-              <span className="mt-1.5 text-xs font-bold">Accept AI Findings</span>
-              <span className="text-[10px] text-gray-500 text-center">Concordant with assessment</span>
+              <span className="mt-1.5 text-xs font-bold">Accept findings</span>
+              <span className="text-[10px] text-gray-500 text-center">Record agreement</span>
             </label>
 
             {/* Modify */}
@@ -134,8 +125,8 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
                 className="sr-only"
               />
               <Edit3 className={`h-6 w-6 ${decision === ReviewDecision.MODIFY ? "text-amber-600" : "text-gray-400"}`} />
-              <span className="mt-1.5 text-xs font-bold">Modify / Refine</span>
-              <span className="text-[10px] text-gray-500 text-center">Adjust diagnosis / risk</span>
+              <span className="mt-1.5 text-xs font-bold">Modify findings</span>
+              <span className="text-[10px] text-gray-500 text-center">Provide a revised finding</span>
             </label>
 
             {/* Reject */}
@@ -156,7 +147,7 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
               />
               <XCircle className={`h-6 w-6 ${decision === ReviewDecision.REJECT ? "text-rose-600" : "text-gray-400"}`} />
               <span className="mt-1.5 text-xs font-bold">Reject Assessment</span>
-              <span className="text-[10px] text-gray-500 text-center">Discordant / Inaccurate</span>
+              <span className="text-[10px] text-gray-500 text-center">Record disagreement</span>
             </label>
           </div>
         </div>
@@ -166,30 +157,15 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
           <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/30 p-3.5 animate-in fade-in">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-amber-900">
-                Revised Physician Diagnosis *
+                Revised finding *
               </label>
               <input
                 type="text"
                 required
                 value={revisedDiagnosis}
                 onChange={(e) => setRevisedDiagnosis(e.target.value)}
-                placeholder="e.g., Mild Cardiomegaly with Early Atelectasis"
+                placeholder="Enter the revised finding"
                 className="mt-1 block w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-gray-900 focus:border-amber-500 focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-bold text-amber-900">
-                <span>Revised Risk Estimate</span>
-                <span>{revisedProbability}%</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={revisedProbability}
-                onChange={(e) => setRevisedProbability(Number(e.target.value))}
-                className="mt-1.5 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-amber-200 accent-amber-600"
               />
             </div>
           </div>
@@ -198,27 +174,25 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
         {/* Clinical Rationale & Notes */}
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-            Clinical Rationale &amp; Documentation{" "}
-            {decision === ReviewDecision.REJECT && <span className="text-rose-600">*</span>}
+            Review rationale *
           </label>
           <textarea
             rows={3}
             value={clinicalNotes}
             onChange={(e) => setClinicalNotes(e.target.value)}
             placeholder={
-              decision === ReviewDecision.REJECT
-                ? "Mandatory: Describe why the AI assessment is discordant with patient presentation..."
-                : "Optional clinical commentary for patient electronic medical record..."
+              decision === ReviewDecision.REJECT || decision === ReviewDecision.MODIFY
+                ? "Explain the reason for changing or rejecting the model-reported findings..."
+                : "Record why you agree with the model-reported findings..."
             }
             className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 p-3 text-xs text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none"
           />
         </div>
 
-        {/* Regulatory Governance Note */}
-        <div className="rounded-lg bg-blue-50/75 p-2.5 text-[11px] text-blue-900 flex items-center gap-2">
-          <ShieldAlert className="h-4 w-4 text-blue-600 flex-shrink-0" />
+        <div className="rounded-lg bg-amber-50 p-2.5 text-[11px] text-amber-950 flex items-center gap-2">
+          <Info className="h-4 w-4 text-amber-700 flex-shrink-0" />
           <span>
-            This submission records a tamper-evident audit record under 21 CFR Part 11 &amp; EU AI Act compliance.
+            This stores a review record in the application. It is not a digital signature or a claim of regulatory compliance.
           </span>
         </div>
 
@@ -239,7 +213,7 @@ export const ReviewSubmissionModal: React.FC<ReviewSubmissionModalProps> = ({
             {isSubmitting ? (
               <LoadingSpinner size="sm" className="p-0 text-white" />
             ) : (
-              "Commit Physician Sign-off"
+              "Save review"
             )}
           </button>
         </div>

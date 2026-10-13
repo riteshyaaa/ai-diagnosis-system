@@ -11,6 +11,7 @@ from app.api.v1.clinical_records import router as clinical_records_router
 from app.api.v1.predictions import router as predictions_router
 from app.api.v1.explanations import router as explanations_router
 from app.api.v1.reviews import router as reviews_router
+from app.api.v1.audit import router as audit_router
 
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(auth_router)
@@ -21,5 +22,6 @@ api_v1_router.include_router(clinical_records_router)
 api_v1_router.include_router(predictions_router)
 api_v1_router.include_router(explanations_router)
 api_v1_router.include_router(reviews_router)
+api_v1_router.include_router(audit_router)
 
 __all__ = ["api_v1_router"]

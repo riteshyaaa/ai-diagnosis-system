@@ -32,8 +32,6 @@ from app.schemas.case import (
     CaseListResponse,
     ImageRecordSummary,
     ClinicalRecordSummary,
-    PredictionSummary,
-    ExplanationSummary,
     ReviewSummary,
 )
 from app.schemas.image import (

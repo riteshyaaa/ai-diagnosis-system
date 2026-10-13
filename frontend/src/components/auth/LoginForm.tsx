@@ -4,7 +4,7 @@
 
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Lock, Mail, AlertCircle, ShieldCheck, Activity } from "lucide-react";
+import { Lock, Mail, AlertCircle, Activity } from "lucide-react";
 import { useAuthStore } from "../../stores/auth.store";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 
@@ -26,11 +26,6 @@ export const LoginForm: React.FC = () => {
     }
   };
 
-  const handleFillDemo = (demoEmail: string) => {
-    setEmail(demoEmail);
-    setPassword("MedFusion#2026Secure!");
-  };
-
   return (
     <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-xl">
       {/* Header */}
@@ -42,7 +37,7 @@ export const LoginForm: React.FC = () => {
           MedFusion <span className="text-primary-600">AI</span>
         </h2>
         <p className="mt-1 text-xs text-gray-500">
-          Assistive Multimodal Clinical Decision Support System (CDSS)
+          Medical software engineering prototype
         </p>
       </div>
 
@@ -58,7 +53,7 @@ export const LoginForm: React.FC = () => {
       <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-            Institutional Email / ID
+            Email
           </label>
           <div className="relative mt-1">
             <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
@@ -107,42 +102,11 @@ export const LoginForm: React.FC = () => {
         </button>
       </form>
 
-      {/* Demo Credentials Helper */}
-      <div className="mt-6 rounded-xl border border-gray-100 bg-gray-50/80 p-3.5 text-xs">
-        <div className="flex items-center gap-1.5 font-bold text-gray-700">
-          <ShieldCheck className="h-3.5 w-3.5 text-primary-600" />
-          <span>Quick Login (Hospital Demo Personas)</span>
-        </div>
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => handleFillDemo("dr.chen@medfusion.local")}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:border-primary-400 hover:text-primary-600"
-          >
-            Dr. Chen (Clinician)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleFillDemo("dr.patel@medfusion.local")}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:border-primary-400 hover:text-primary-600"
-          >
-            Dr. Patel (Radiologist)
-          </button>
-          <button
-            type="button"
-            onClick={() => handleFillDemo("admin@medfusion.local")}
-            className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:border-primary-400 hover:text-primary-600"
-          >
-            Admin / Compliance
-          </button>
-        </div>
-      </div>
-
       {/* Register Link */}
       <div className="mt-6 text-center text-xs text-gray-500">
-        New clinical staff member?{" "}
+        Need an account?{" "}
         <Link to="/register" className="font-bold text-primary-600 hover:underline">
-          Register Institutional Profile
+          Create account
         </Link>
       </div>
     </div>

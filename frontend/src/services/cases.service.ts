@@ -5,6 +5,7 @@
 import api from "./api";
 import type {
   CaseCreatePayload,
+  CaseReportPreview,
   CaseListResponse,
   CaseStatusUpdatePayload,
   CaseUpdatePayload,
@@ -26,7 +27,13 @@ export const caseService = {
    * Fetch comprehensive case details including relational graph (images, records, predictions, reviews).
    */
   async getCaseById(caseId: string): Promise<DiagnosticCaseDetail> {
-    const { data } = await api.get<DiagnosticCaseDetail>(`/cases/${caseId}`);
+    const { data } = await api.get<DiagnosticCaseDetail>(`/cases/${caseId}/details`);
+    return data;
+  },
+
+  /** Build a protected, non-final report preview from persisted case records. */
+  async getReportPreview(caseId: string): Promise<CaseReportPreview> {
+    const { data } = await api.get<CaseReportPreview>(`/cases/${caseId}/report-preview`);
     return data;
   },
 

@@ -34,9 +34,12 @@ Protected routes use an `Authorization: Bearer <access_token>` header. Registrat
 - `GET /api/v1/cases`
 - `GET /api/v1/cases/{case_id}`
 - `GET /api/v1/cases/{case_id}/details`
+- `GET /api/v1/cases/{case_id}/report-preview` â€” owner-scoped JSON preview generated from persisted case records
 - `PATCH /api/v1/cases/{case_id}`
 - `POST /api/v1/cases/{case_id}/status`
 - `DELETE /api/v1/cases/{case_id}`
+
+The report preview omits MRN hashes, free-text notes, and arbitrary `raw_metrics`; it includes exact image/clinical input references and marks stored model output as current or stale against those inputs. It labels stored probabilities as unverified and reports only `DRAFT` or `PENDING_REVIEW`. It is not persisted and does not create a finalized PDF, signature, or controlled-delivery artifact.
 
 ## Inputs and images
 
@@ -68,7 +71,7 @@ The image and direct-inference upload routes use bounded application-level reads
 - `GET /api/v1/cases/{case_id}/explanations`
 - `POST /api/v1/predictions/{prediction_id}/explain-pathology`
 
-**Current model availability:** this repository has no trained checkpoint artifacts. Prediction requests that reach inference therefore return HTTP `503 Service Unavailable`; no prediction is persisted. Endpoint presence does not imply a validated model is available.
+**Current model availability:** the tracked registry has no active, provenance-verified checkpoint. Prediction requests therefore return HTTP `503 Service Unavailable`; no prediction is persisted. Endpoint presence does not imply a validated model is available.
 
 ## Reviews
 
@@ -79,6 +82,15 @@ The image and direct-inference upload routes use bounded application-level reads
 - `GET /api/v1/reviews`
 - `GET /api/v1/reviews/{review_id}`
 
+## Audit events
+
+- `GET /api/v1/audit-events` (administrator/auditor roles only)
+- Optional filters: `actor_id`, `action`, `resource_type`, `start_time`, and `end_time`
+- Pagination: `skip` (default `0`) and `limit` (default `25`, maximum `100`)
+- The response includes event ID, actor UUID, action, resource type/ID, and timestamp. It omits free-form `details`, IP address, and user-agent fields.
+
+This is a read-only view over ordinary database rows. It is not immutable or tamper-evident. Some event types may not be recorded by the current application.
+
 ## Not implemented in the registered API
 
-There is no registered audit-events endpoint, report-generation/delivery endpoint, or administrator user-management endpoint in the inspected router set. Patient/case route authentication is not a substitute for object-level or tenant authorization; see `SECURITY.md` and `IMPLEMENTATION_AUDIT.md`.
+There is no finalized report/PDF delivery or administrator user-management endpoint. Patient/case route authentication is not a substitute for object-level or tenant authorization; see `SECURITY.md` and `IMPLEMENTATION_AUDIT.md`.

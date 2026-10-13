@@ -1,13 +1,11 @@
-"""
-MedFusion AI — Immutable Audit Log ORM Model.
+"""Application audit-event ORM model.
 
-Maintains an append-only audit trail for all security, compliance,
-clinical access, and AI inference events across the system.
+This table is not independently immutable or tamper-evident.
 """
 
 from datetime import datetime, timezone
 import enum
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 import uuid
 from sqlalchemy import DateTime, Enum, ForeignKey, JSON, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -15,9 +13,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDMixin
 
+if TYPE_CHECKING:
+    from app.models.user import User
+
 
 class AuditAction(str, enum.Enum):
-    """Enumeration of system and user events requiring compliance logging."""
+    """Application event categories recorded by available call sites."""
     USER_LOGIN = "user_login"
     USER_LOGOUT = "user_logout"
     USER_LOGIN_FAILED = "user_login_failed"
@@ -67,7 +68,7 @@ class AuditResourceType(str, enum.Enum):
 
 
 class AuditLog(Base, UUIDMixin):
-    """Immutable audit trail log record."""
+    """Persisted application audit event."""
 
     __tablename__ = "audit_logs"
 

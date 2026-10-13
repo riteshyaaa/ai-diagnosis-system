@@ -201,3 +201,45 @@ async def test_case_update_and_draft_deletion(client: AsyncClient):
     # Ensure it no longer exists
     get_res = await client.get(f"/api/v1/cases/{case_id}", headers=headers)
     assert get_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_case_and_patient_access_are_scoped_to_the_creator(client: AsyncClient):
+    """Foreign users cannot discover, mutate, or attach another user's records."""
+    owner_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.case.owner@hospital.org')}"
+    }
+    other_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.case.other@hospital.org')}"
+    }
+    patient_id = await create_test_patient(client, owner_headers, "MRN-CASE-OWNER-SCOPE")
+    case_res = await client.post(
+        "/api/v1/cases",
+        json={"patient_id": patient_id, "modality": "image_only"},
+        headers=owner_headers,
+    )
+    assert case_res.status_code == 201, case_res.text
+    case_id = case_res.json()["id"]
+
+    assert (await client.get(f"/api/v1/cases/{case_id}", headers=other_headers)).status_code == 404
+    assert (
+        await client.get(f"/api/v1/cases/{case_id}/details", headers=other_headers)
+    ).status_code == 404
+    assert (await client.get("/api/v1/cases", headers=other_headers)).json()["total"] == 0
+    assert (
+        await client.patch(
+            f"/api/v1/cases/{case_id}",
+            json={"chief_complaint": "unauthorized update"},
+            headers=other_headers,
+        )
+    ).status_code == 404
+    assert (
+        await client.delete(f"/api/v1/cases/{case_id}", headers=other_headers)
+    ).status_code == 404
+    assert (
+        await client.post(
+            "/api/v1/cases",
+            json={"patient_id": patient_id, "modality": "image_only"},
+            headers=other_headers,
+        )
+    ).status_code == 404

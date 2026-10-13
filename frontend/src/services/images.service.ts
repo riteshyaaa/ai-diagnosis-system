@@ -17,11 +17,11 @@ export const imageService = {
   async uploadImage(
     caseId: string,
     file: File,
-    imageType: ImageType = ImageType.CHEST_XRAY_PA
+    imageType?: ImageType
   ): Promise<ImageUploadResponse> {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("image_type", imageType);
+    if (imageType) formData.append("image_type", imageType);
 
     const { data } = await api.post<ImageUploadResponse>(
       `/cases/${caseId}/images`,
@@ -43,6 +43,16 @@ export const imageService = {
     return data;
   },
 
+  /** Download an authorized image variant with the shared bearer-token client. */
+  async downloadImage(imageId: string, signal?: AbortSignal): Promise<Blob> {
+    const { data } = await api.get<Blob>(`/images/${imageId}/file`, {
+      params: { variant: "processed" },
+      responseType: "blob",
+      signal,
+    });
+    return data;
+  },
+
   /**
    * Fetch all images associated with a specific case.
    */
@@ -51,11 +61,4 @@ export const imageService = {
     return data;
   },
 
-  /**
-   * Get raw or processed image download URL.
-   */
-  getImageDownloadUrl(imageId: string): string {
-    const baseUrl = api.defaults.baseURL || "http://localhost:8000/api/v1";
-    return `${baseUrl}/images/${imageId}/file`;
-  },
 };

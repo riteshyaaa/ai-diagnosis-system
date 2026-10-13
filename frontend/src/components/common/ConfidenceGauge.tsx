@@ -21,7 +21,7 @@ export const ConfidenceGauge: React.FC<ConfidenceGaugeProps> = ({
   calibratedProbability,
   confidenceScore,
   confidenceBand,
-  label = "Calibrated Risk Probability",
+  label = "Model output score",
   size = "md",
 }) => {
   const displayProb = calibratedProbability !== undefined && calibratedProbability !== null
@@ -30,14 +30,6 @@ export const ConfidenceGauge: React.FC<ConfidenceGaugeProps> = ({
 
   const percent = Math.min(Math.max(Math.round(displayProb * 1000) / 10, 0), 100);
   const confidencePercent = Math.min(Math.max(Math.round(confidenceScore * 100), 0), 100);
-
-  const getRiskColor = (val: number) => {
-    if (val < 30) return { stroke: "#10b981", text: "text-emerald-600", bg: "bg-emerald-500" };
-    if (val < 60) return { stroke: "#f59e0b", text: "text-amber-600", bg: "bg-amber-500" };
-    return { stroke: "#ef4444", text: "text-rose-600", bg: "bg-rose-500" };
-  };
-
-  const riskTheme = getRiskColor(percent);
 
   return (
     <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
@@ -50,7 +42,7 @@ export const ConfidenceGauge: React.FC<ConfidenceGaugeProps> = ({
 
       <div className="mt-3 flex items-baseline justify-between">
         <div className="flex items-baseline gap-2">
-          <span className={clsx("font-extrabold tracking-tight", riskTheme.text, size === "lg" ? "text-4xl" : "text-3xl")}>
+          <span className={clsx("font-extrabold tracking-tight text-primary-700", size === "lg" ? "text-4xl" : "text-3xl")}>
             {percent}%
           </span>
           {calibratedProbability !== undefined && calibratedProbability !== null && (
@@ -60,7 +52,7 @@ export const ConfidenceGauge: React.FC<ConfidenceGaugeProps> = ({
           )}
         </div>
         <div className="text-right">
-          <span className="text-xs text-gray-500">Confidence Metric</span>
+          <span className="text-xs text-gray-500">Model-reported score</span>
           <p className="text-xs font-bold text-gray-700">{confidencePercent}%</p>
         </div>
       </div>
@@ -68,15 +60,15 @@ export const ConfidenceGauge: React.FC<ConfidenceGaugeProps> = ({
       {/* Progress Bar */}
       <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-gray-100">
         <div
-          className={clsx("h-full transition-all duration-500 ease-out", riskTheme.bg)}
+          className="h-full bg-primary-600 transition-all duration-500 ease-out"
           style={{ width: `${percent}%` }}
         />
       </div>
 
       <div className="mt-2 flex justify-between text-[10px] text-gray-400">
-        <span>0% (Low Risk)</span>
-        <span>50% (Threshold)</span>
-        <span>100% (High Risk)</span>
+        <span>0%</span>
+        <span>50%</span>
+        <span>100%</span>
       </div>
     </div>
   );

@@ -11,9 +11,7 @@ import type {
 } from "../types";
 
 export const explanationService = {
-  /**
-   * Fetch full composite XAI explanation (Grad-CAM + SHAP + Modality Gating) for a prediction.
-   */
+  /** Fetch attribution artifacts actually stored for a prediction, if any. */
   async getExplanationByPredictionId(predictionId: string): Promise<ExplanationResponse> {
     const { data } = await api.get<ExplanationResponse>(
       `/predictions/${predictionId}/explanation`
@@ -21,53 +19,44 @@ export const explanationService = {
     return data;
   },
 
-  /**
-   * Fetch visual Grad-CAM saliency map and bounding attention regions.
-   */
+  /** Read visual attribution from the stored composite explanation, when present. */
   async getGradCam(predictionId: string): Promise<VisualExplanationResponse> {
-    const { data } = await api.get<VisualExplanationResponse>(
-      `/predictions/${predictionId}/gradcam`
+    const { data } = await api.get<ExplanationResponse>(
+      `/predictions/${predictionId}/explanation`
     );
+    if (!data.visual_explanation) {
+      throw new Error("Visual attribution is unavailable for this prediction.");
+    }
+    return data.visual_explanation;
+  },
+
+  /** Download a protected heatmap through the authenticated API client. */
+  async downloadHeatmap(predictionId: string, signal?: AbortSignal): Promise<Blob> {
+    const { data } = await api.get<Blob>(`/predictions/${predictionId}/heatmap`, {
+      responseType: "blob",
+      signal,
+    });
     return data;
   },
 
-  /**
-   * Fetch structured tabular SHAP feature attributions and risk contributions.
-   */
+  /** Fetch stored tabular attribution values, when available. */
   async getShapAttributions(predictionId: string): Promise<FeatureAttributionsResponse> {
     const { data } = await api.get<FeatureAttributionsResponse>(
-      `/predictions/${predictionId}/shap`
+      `/predictions/${predictionId}/features`
     );
     return data;
   },
 
-  /**
-   * Recalculate Grad-CAM saliency heatmap for an alternative thoracic pathology.
-   */
+  /** Request alternate visual attribution; the backend may reject it if no model is available. */
   async recalculatePathologySaliency(
     predictionId: string,
     payload: RecalculatePathologySaliencyRequest
   ): Promise<VisualExplanationResponse> {
     const { data } = await api.post<VisualExplanationResponse>(
-      `/predictions/${predictionId}/gradcam/recalculate`,
+      `/predictions/${predictionId}/explain-pathology`,
       payload
     );
     return data;
   },
 
-  /**
-   * Get direct URL to download raw Grad-CAM heatmap artifact.
-   */
-  getHeatmapDownloadUrl(predictionId: string): string {
-    const baseUrl = api.defaults.baseURL || "http://localhost:8000/api/v1";
-    return `${baseUrl}/predictions/${predictionId}/heatmap`;
-  },
-
-  /**
-   * Get direct URL to download blended radiograph overlay artifact.
-   */
-  getOverlayDownloadUrl(predictionId: string): string {
-    const baseUrl = api.defaults.baseURL || "http://localhost:8000/api/v1";
-    return `${baseUrl}/predictions/${predictionId}/overlay`;
-  },
 };

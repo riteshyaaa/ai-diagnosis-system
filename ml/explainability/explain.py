@@ -7,11 +7,10 @@ Provides:
 - SHAP KernelExplainer for deep tabular MLP clinical embeddings
 """
 
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+import importlib.util
+from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 
 class GradCAMExplainer:
@@ -222,9 +221,7 @@ class SHAPExplainerEngine:
     """
 
     def __init__(self, model: Any):
-        try:
-            import shap
-        except ImportError:
+        if importlib.util.find_spec("shap") is None:
             raise ImportError("SHAP library not installed. Install with: pip install shap")
         self.model = model
         self.model_type = self._detect_model_type()
@@ -297,21 +294,23 @@ class SHAPExplainerEngine:
 
         Args:
             X: Input clinical feature array [n_samples, n_features]
-            background_data: Background dataset for SHAP. If None, uses first 100 samples.
+            background_data: Explicit training-derived data used as the SHAP baseline.
             feature_names: List of feature names (optional)
             n_samples: Number of SHAP value computations (used for KernelExplainer)
         Returns:
             Dictionary with SHAP values, feature importance attributions, and base/expected values.
         """
-        import shap
 
-        # Determine background dataset
         if background_data is None:
-            if isinstance(X, np.ndarray) and len(X) >= 10:
-                background_data = X[:min(100, len(X))]
-            else:
-                # Default synthetic background for small/empty sets
-                background_data = np.random.randn(100, X.shape[1] if X.ndim > 1 else 1).astype(np.float32)
+            raise ValueError(
+                "SHAP explanations require an explicit training-derived background dataset."
+            )
+        if background_data.ndim != 2 or X.ndim != 2:
+            raise ValueError("SHAP input and background data must both be two-dimensional arrays.")
+        if background_data.shape[1] != X.shape[1]:
+            raise ValueError("SHAP input and background data must have the same feature count.")
+        if background_data.shape[0] == 0:
+            raise ValueError("SHAP background data must contain at least one row.")
 
         if self.model_type == "tree":
             self.explainer = self.build_tree_explainer(background_data=background_data)

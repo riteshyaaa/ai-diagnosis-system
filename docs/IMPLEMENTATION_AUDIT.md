@@ -1,148 +1,131 @@
-# Implementation audit
+# MedFusion AI implementation audit
 
-**Audit baseline:** `main` at `9e820afe82b2678791d8581d8969f09c8af5720e`
-**Repository:** `riteshyaaa/ai-diagnosis-system`
-**Scope:** static repository inspection plus the local verification attempts recorded below. This document does not claim a deployment, database-backed run, or clinical validation.
+**Audit scope:** local repository and available runtime, using the supplied engineering prompt as the requirements text.
 
-## A. Initial findings
+**Repository baseline:** `main`, commit `cb6092bd41c9902fa221c1b2501881496c419b35`, captured with a clean working tree before this implementation pass. The checkout is not shallow and contains 9 commits. The presentation file titled “AI Medical Diagnosis System” was not found in the repository, adjacent project folder, Desktop, or Downloads. Presentation-specific diagrams and claims therefore remain unverified; this audit maps requirements from the supplied prompt.
 
-The repository is a substantial prototype organized as a React/TypeScript frontend, FastAPI/SQLAlchemy backend, PostgreSQL schema and migrations, and a PyTorch-oriented ML subsystem. It includes routers and services for authentication, patients, cases, imaging uploads, clinical records, predictions, explanations, and clinician reviews. It also contains model architectures, synthetic-data generators, training/evaluation code, and Docker configuration.
+**Status terms:** `IMPLEMENTED_VERIFIED` means the behavior was exercised successfully here; `IMPLEMENTED_UNVERIFIED` means code exists but the relevant workflow has not been exercised; `PARTIAL` means only some requirements are implemented; `RESEARCH_ONLY` means experimental code exists without evidence for clinical use; `BLOCKED` means a safety or resource condition prevents the capability; `MISSING` means no implementation was found; `NOT_IMPLEMENTED` means explicitly outside the current code.
 
-The presence of code, tests, diagrams, manifests, and documentation is not evidence that the complete product workflows run. Before this pass:
+## Baseline and environment
 
-- Public registration accepted a client-selected role and the service persisted it.
-- Registry startup could create fresh random-weight networks, label them active, and attach hard-coded evaluation metrics. Its tabular path also created a calibrator from synthetic probability/label pairs.
-- The checked-in registry declared three active models and non-empty metrics/checksums, but no checkpoint or calibrator artifact was present in the repository.
-- The audit screen displayed hard-coded events and asserted immutable logging and 21 CFR Part 11 compliance. There is no audit-events API in the versioned API routers.
-- Upload endpoints read the whole file into memory before the service-level size check.
-- Case and patient queries require authentication on many routes but do not consistently enforce record ownership or institutional scope. The repository has no organization/tenant model, so the correct sharing policy cannot be inferred.
-- The documentation overstated properties such as immutable audit logging, encryption/anonymization, test coverage, and ready-to-run workflows.
-- The prompt refers to a product-presentation PDF. The supplied attachment is the engineering prompt text; the repository tree contains no presentation PDF. Presentation-specific workflows and diagrams therefore could not be inspected.
+| Item | Observation |
+|---|---|
+| Git | Branch `main`, initially clean, tracking `origin/main`; 9 commits; not shallow. |
+| Local instructions | No `AGENTS.md` or `CLAUDE.md` was found in the repository. |
+| Backend runtime | Workspace virtual environment: Python 3.13.0; FastAPI 0.115.6, SQLAlchemy 2.0.36, Pytest 8.3.4, PyTorch 2.14.1 CPU, Ruff 0.8.6, Mypy 1.14.1. The system `python` resolves to 3.15.0; use `.venv` explicitly. |
+| Frontend runtime | Node 24.21.0, npm 11.7.0, installed `node_modules`, lockfile present; React 18 and Vite 6. |
+| Database | The local unshared `.env` selects SQLite (credentials and values are intentionally omitted). Startup checks that the database is at the current Alembic head and refuses to start otherwise. Automated API/migration tests use disposable SQLite databases. |
+| Docker | Docker CLI 28.3.2 is installed, but the Docker Desktop Linux engine pipe is unavailable. Containers/builds were not run. |
+| Presentation | No matching PDF/PPT/PPTX was found in the searched locations. The supplied engineering prompt is the only requirements artifact available in this workspace. |
+| Runtime check | Before this pass, FastAPI `/health` and the Vite root page both returned HTTP 200. Both servers have since been stopped at the user’s request. |
 
-## B. Changes made in this pass
+## 1. Repository architecture and feature-to-code map
 
-These edits exist in the local working copy and have **not** been published to GitHub.
+The repository is a modular-monolith prototype. The React/TypeScript/Vite UI calls a typed Axios client; FastAPI routes delegate to service classes and SQLAlchemy repositories; ML code is under `ml/`; Docker Compose describes PostgreSQL, API, and Nginx frontend services.
 
-- **Backend/auth:** `UserCreate` now rejects extra fields, including `role`; public registration creates only clinician accounts in `backend/app/services/auth_service.py`.
-- **Backend/uploads:** `backend/app/utils/uploads.py` caps application-level reads at configured maximum plus one byte. Both case-image upload and direct-inference upload use it.
-- **Backend/inference:** missing model artifacts are translated to the existing service-unavailable response. A case is not moved to `PROCESSING` unless inference succeeded.
-- **ML/model registry:** startup no longer constructs implicit random baseline models or assigns mock metrics/calibration. New registrations default to `experimental`; default loads require an explicitly promoted version; promotion checks that the artifact exists and its checksum matches.
-- **ML metadata:** manifest and model metadata no longer claim active models, checksums, calibrator files, or evaluation metrics that are absent from the repository.
-- **Frontend:** public registration types no longer allow a role; `AuditPage.tsx` now reports that no audit-events API is available instead of displaying sample events or a compliance claim.
-- **Tests:** registration privilege-escalation cases, no-checkpoint behavior, model-promotion checks, bounded upload reads, and test-only provisioning of privileged roles were added/updated. Inference-dependent explanation/review tests now skip explicitly unless all registered checkpoint files are present; prediction and end-to-end checks expect HTTP 503 and no persisted prediction with the current registry.
-- **Documentation:** README, API, architecture, dataset, deployment, ML-pipeline, security, testing, model-card, changelog, and this audit now distinguish source code from verified capabilities.
-
-## C. Verification results
-
-| Check | Result | Evidence / limitation |
+| Area | Main code locations | What is present |
 |---|---|---|
-| Repository access and baseline | **PASS** | GitHub API returned `main` at `9e820afe82b2678791d8581d8969f09c8af5720e`; repository is reachable. |
-| Prompt attachment read | **PASS** | Engineering brief was available as text. No PDF was attached or found in the repository. |
-| Python test suite (`pytest -q`) | **BLOCKED** | Command could not start: `pytest: command not found`. Runtime also lacks FastAPI, Pydantic, SQLAlchemy, PyTorch, NumPy, and the other project dependencies. |
-| Frontend production build (`cd frontend && npm run build`) | **BLOCKED** | Command could not start: `tsc: not found`; `frontend/node_modules` is absent. |
-| Test results for this patch | **NOT RUN** | Dependencies are unavailable in this environment; the changed tests have not been executed. |
-| Python syntax and registry metadata | **STATIC CHECK PASS** | BOM-aware Python compilation parsed 144 source/test files; 6 JSON files parsed; all 3 registry entries have no active version, fabricated metrics, or unsupported checksum. This does not import dependencies or execute tests. |
-| Docker Compose config | **BLOCKED** | The configuration check stopped because repository-root `.env` is absent (`env_file` references it); no temporary environment file was created. |
-| Docker daemon/build | **BLOCKED** | `docker info` reported that it could not connect to `/var/run/docker.sock`; no containers were started. |
-| CI status | **NOT CONFIGURED** | No repository GitHub Actions workflow was present in the inspected tree. |
-| Clinical/model validation | **NOT AVAILABLE** | No real model checkpoints, dataset payloads, evaluation output, or provenance package were found. |
+| Authentication | `backend/app/api/v1/auth.py`, `services/auth_service.py`, `security/`, `models/user.py`, `schemas/user.py` | Password login, access/refresh JWT issuance, public clinician registration, password changes, role dependencies. |
+| Patients and cases | `api/v1/patients.py`, `cases.py`, `services/patient_service.py`, `case_service.py`, `repositories/`, `models/patient.py`, `diagnostic_case.py` | Patient creation/search and case lifecycle, filters, case detail graph. Both patients and cases now record an owner; legacy ownership is conservative. |
+| Imaging and clinical data | `api/v1/images.py`, `clinical_records.py`, image/clinical services, `ml/datasets/chest_xray/`, `ml/datasets/heart_disease/` | PNG/JPEG/DICOM intake, preprocessing and quality report code, explicit tabular fields and range validation. |
+| Prediction and explanations | `api/v1/predictions.py`, `explanations.py`, `services/ai_inference_service.py`, `ml/inference/`, `ml/explainability/` | Case and direct-inference contracts, model adapter, prediction/explanation persistence code. No model version is promoted in the tracked registry. |
+| Human review | `api/v1/reviews.py`, `services/clinical_review_service.py`, `models/clinical_review.py`, frontend review components | Accept/modify/reject review persistence, rationale checks, owner-only access and review history UI. Finalization and explicit revision semantics remain incomplete. |
+| Audit | `api/v1/audit.py`, `schemas/audit.py`, `services/audit_service.py`, `repositories/audit_log_repository.py`, `frontend/src/pages/AuditPage.tsx` | Read-only, paginated audit-event API for administrators/auditors and live UI. Response omits event details and network metadata. Coverage is partial; storage is an ordinary mutable database table. |
+| Reports | `backend/app/services/case_report_service.py`, `backend/app/api/v1/cases.py`, `backend/app/schemas/report.py` | Owner-scoped JSON preview built from persisted case inputs, model output, and linked review records; no PDF or persisted report artifact. |
+| Frontend | `frontend/src/App.tsx`, `pages/`, `components/`, `services/`, `stores/` | Login, registration, cases/workstation, analytics, paginated audit events, typed API wrappers and Zustand stores. |
+| ML | `ml/models/`, `datasets/`, `training/`, `evaluation/`, `inference/`, `registry/`, `experiments/` | Architectures, synthetic experiments, preprocessing, loaders, registry, calibration and explanation code. These files do not establish clinical performance. |
+| Deployment | `docker/`, `.env.example`, `Makefile`, `backend/alembic/` | Compose, Dockerfiles, Nginx configuration, three Alembic revisions and developer commands. Startup validates migration state; migrations must be run explicitly. |
 
-Do not interpret static edits as passed integration tests. Install the repository's pinned dependencies and run the commands in `TESTING.md` before merging.
+## 2. Current feature inventory
 
-## D. Capability matrix
-
-Statuses describe what the inspected repository supports, not product promises.
-
-| Capability / requirement | Status | Evidence and limitation |
+| Feature | Status | Evidence and limitation |
 |---|---|---|
-| User login, JWTs, account registration | **IMPLEMENTED_UNVERIFIED** | Routes/services and integration tests exist. Public registration is now clinician-only in this patch; tests could not run. |
-| Role-based endpoint checks | **PARTIAL** | Role dependencies exist; object-level and cross-institution access is not consistently enforced. |
-| Patient and case CRUD/worklist | **PARTIAL** | API and UI code exist; case lists and resource reads lack a defined tenant/ownership policy. |
-| PNG/JPEG/DICOM upload and preprocessing | **IMPLEMENTED_UNVERIFIED** | Processing and validation code exists; API reads are now bounded. End-to-end storage and privacy behavior have not been run here. |
-| Image, tabular, and multimodal architectures | **RESEARCH_ONLY** | Model and trainer code exists. Checked-in trained weights and a verified compatible preprocessing bundle are absent. |
-| Clinical inference from a verified model | **BLOCKED** | No deployable artifact or evaluation provenance. The patched registry leaves these paths unavailable and API calls return a service-unavailable error rather than random predictions. |
-| Calibration and uncertainty claims | **BLOCKED** | The checked-in metrics/calibrator had no verifiable data or artifact provenance; those claims were removed. |
-| Grad-CAM / SHAP | **RESEARCH_ONLY** | Implementation code exists, but no real-model output was verified. The tabular explainer can synthesize a random background when none is supplied. |
-| Clinician review workflow | **IMPLEMENTED_UNVERIFIED** | Review routes, models, and UI code exist; authorization, persistence, and lifecycle behavior were not executed. |
-| Audit-event storage | **PARTIAL** | Audit models/services exist. No versioned audit-events API or immutable/tamper-evident store was found. The frontend now states this limitation. |
-| Report generation and controlled delivery | **MISSING** | No report API/service or report generator was found in the inspected source tree. |
-| CT/MRI, pathology images, transformer model, emergency triage, chronic disease screening | **NOT_IMPLEMENTED** | Mentioned in the prompt/presentation reference, but no verified supported workflow or model artifact was found. |
-| Telemedicine, edge deployment, mobile client | **NOT_IMPLEMENTED** | No implementation was found in the inspected repository. |
-| Frontend unit/component tests | **MISSING** | No frontend test files were found despite a Vitest script in `frontend/package.json`. |
-| CI checks / deployment verification | **BLOCKED** | No checked-in CI workflow; local build/test commands could not run. |
+| Login and public registration | `IMPLEMENTED_UNVERIFIED` | API routes and auth tests exist. Public registration is clinician-only and rejects extra fields. Refresh tokens are not tracked server-side; logout only confirms client token disposal. |
+| Role-based and record ownership checks | `PARTIAL` | Role dependencies remain. Owner-only checks now scope patient, case, image, clinical-record, prediction, explanation, and review access; negative cross-user API tests cover these resource families. There is no organization/team sharing model, and legacy patients with ambiguous ownership remain inaccessible. |
+| Production configuration checks | `IMPLEMENTED_VERIFIED` | Unit tests verify rejection of debug/demo settings, placeholder/short signing keys, non-PostgreSQL or loopback database URLs, weak/default database credentials, and non-HTTPS CORS origins. Secret storage/rotation and production deployment are not verified. |
+| Patient CRUD and MRN lookup | `IMPLEMENTED_VERIFIED` | Patient ownership is stored and list/search/read/update operations are owner-scoped. Migration `002_patient_owner` backfills only from a unique patient-create audit actor; ambiguous or absent history remains unowned. Tests exercise cross-user denial. MRN hashing remains unkeyed SHA-256 and is not de-identification. |
+| Case creation, status and detail | `IMPLEMENTED_VERIFIED` | Cases and nested resources are owner-scoped in services; tests exercise foreign-user read/mutation denial. Assignment and institution-wide access are not implemented. |
+| Image upload and file serving | `PARTIAL` | Bounded API reads and owner checks for upload, metadata, file read/delete are implemented and integration-tested. Image/DICOM processing exists. Proxy-level body/concurrency limits and durable storage/database rollback consistency still need deployment verification. |
+| Structured clinical data | `PARTIAL` | Explicit schema fields and range checks exist; case-owner checks and update support are implemented. The serving preprocessor still lacks a verified training-fitted artifact and `raw_metrics` accepts arbitrary JSON. |
+| Image-only/tabular inference | `BLOCKED` | The code has those paths, but the registry manifest has no active model and there is no verified compatible model bundle. Missing weights currently fail closed with 503. |
+| Multimodal inference | `BLOCKED` | Fusion architecture and trainer exist. No paired-data provenance, joint-training evidence, promoted checkpoint, or compatible preprocessing bundle was found. |
+| Calibration and uncertainty | `BLOCKED` | No matching calibration/evaluation provenance is available. UI wording identifies stored probability bands as unvalidated output; this is not a validated uncertainty or abstention system. |
+| Grad-CAM and SHAP | `BLOCKED` | No verified model/background artifact is available. Synthetic SHAP baselines, default gating weights, and probability-derived anatomical boxes were removed. Explanation generation returns unavailable when required artifacts are missing; no displayed attribution/localization has been clinically or technically validated against a promoted model. |
+| Human review | `PARTIAL` | Accept/modify/reject persistence and rationale checks exist; the UI no longer implies saved review edits or clinician credential verification. Owner-level access tests cover review reads. Finalization, immutable revision history, and signature/regulatory semantics are not implemented. |
+| Audit-event viewing | `PARTIAL` | Admin/auditor-only paginated API and real frontend view are implemented. Responses exclude free-form details, IP and user-agent; new database details are allowlisted to technical metadata and tested to drop clinical/free text. Previously stored rows are not scrubbed. Some event call sites are missing; rows are not immutable/tamper-evident and no retention policy is defined. |
+| Reports and controlled delivery | `PARTIAL` | Owner-scoped `/cases/{case_id}/report-preview` returns a non-final JSON snapshot with current-input checks, minimal patient demographics, structured inputs, model/version, unverified-score notice, and linked review. It excludes MRN hashes and free-text case notes. No PDF, immutable report artifact, explicit finalization/signature, or controlled delivery exists. Three integration tests cover draft, current prediction, and foreign-owner denial. |
+| Analytics | `PARTIAL` | Review statistics endpoints and a dashboard exist; scope and access filtering are not established. |
+| Frontend checks | `IMPLEMENTED_VERIFIED` | ESLint, TypeScript/Vite production build, and 12 Vitest tests pass in this environment. Tests cover registration, case/report/explanation/audit clients, report preview/stale output, attribution fallback, and case-store freshness. There is no browser-driven E2E suite; the build reports an approximately 832 kB JS chunk. |
+| CT/MRI, pathology imaging, emergency triage, mobile client, telemedicine, edge deployment | `NOT_IMPLEMENTED` | No supported end-to-end capability was found. |
 
-`IMPLEMENTED_UNVERIFIED` means code exists but this environment did not execute it. `RESEARCH_ONLY` does not mean clinically useful or validated.
+## 3. Model and dataset evidence
 
-## E. Model evidence
+The tracked `models/registry/registry_manifest.json` lists three experimental versions, each with `active_version: null`, empty metrics, empty checksum, and no preprocessing/evaluation schema. The model artifacts are absent from Git but **do exist locally as ignored files**. Each `.pt` file was opened using PyTorch `weights_only=True` and returned a dictionary; this verifies restricted deserialization only, not architecture compatibility, training, or medical validity. The local calibrator is a `.joblib` pickle and was not loaded.
 
-The repository contains registry metadata for:
+| Local ignored artifact | SHA-256 | Evidence status |
+|---|---|---|
+| `chest_xray_vision/v1.0.0/chest_xray_vision_v1.0.0.pt` | `4445184059D34FB08DA22BDDF89494E2F8AF82C53FA378425D3654ADD6AA6A3C` | Restricted load succeeded; training and label/preprocessing provenance unknown; registry checksum blank. |
+| `tabular_risk_mlp/v1.0.0/tabular_risk_mlp_v1.0.0.pt` | `312C74C8C7574F133EF2DC45D9DCC1A2878E39731FEB2150BED6FB5595157A3C` | Restricted load succeeded; training and preprocessing provenance unknown; registry checksum blank. |
+| `multimodal_late_fusion/v1.0.0/multimodal_late_fusion_v1.0.0.pt` | `B6F0EE3FBF8AC201B04243E5D39F5C70DE72ABFBBFE86D85C0D2C79D1AA4D9FB` | Restricted load succeeded; paired-data/joint-training provenance unknown; registry checksum blank. |
+| `tabular_risk_mlp/v1.0.0/calibrator.joblib` | `70D99045B5BF17CE75E3E38720F2A545DB64D968B79283DB597B0318D9200400` | Present locally, not tracked, not loaded; compatibility and fitting provenance unknown. |
 
-| Registry name | Expected artifact | Artifact found? | Safe for inference? |
-|---|---|---:|---|
-| `chest_xray_vision` | `chest_xray_vision_v1.0.0.pt` | No | No |
-| `tabular_risk_mlp` | `tabular_risk_mlp_v1.0.0.pt` and `calibrator.joblib` | No | No |
-| `multimodal_late_fusion` | `multimodal_late_fusion_v1.0.0.pt` | No | No |
+`data/` contains only `.gitkeep` placeholders. Dataset code references NIH ChestX-ray14 and UCI Heart Disease, but no dataset payload, license/acquisition records, patient-level split manifest, evaluation report, or training provenance was found. Synthetic-data training code exists and is useful for software experiments only. **No prediction path is enabled or claimed as verified.**
 
-No checkpoint checksum can be independently computed, no preprocessing bundle can be matched to a checkpoint, and no evaluation report or dataset provenance is available in the repository. The previously populated manifest metrics are therefore not retained as evidence.
+## 4. Security, privacy, and reliability findings
 
-`ml/experiments/` includes synthetic-data training paths. The synthetic generators are useful for software experiments, not evidence of diagnostic performance. No real-data training or clinically relevant validation is claimed.
+1. **High - object-level authorization:** owner-only checks now cover patients, cases, images, clinical records, predictions, explanations and reviews, with negative cross-user API tests. No organization/team assignment model exists. Legacy patient rows that lack a uniquely evidenced owner intentionally remain inaccessible until ownership is resolved through an authorized process.
+2. **High — production configuration:** production configuration rejects debug/demo settings, weak or placeholder secrets and database credentials, loopback database URLs, and non-HTTPS CORS origins; secret handling and production deployment remain unverified. The local `.env` was not printed or copied into this audit.
+3. **High — model provenance:** local checkpoint files are ignored, registry hashes are empty, active versions are null, and evaluation/preprocessing provenance is missing. Keep inference fail-closed.
+4. **Medium — patient identifier hashing:** raw MRNs are transformed using deterministic SHA-256 without a keyed secret. This does not make low-entropy identifiers resistant to guessing.
+5. **Medium — DICOM/image privacy:** code whitelists technical DICOM tags, but no pixel-level burned-in identifier detection/redaction was verified. DICOM metadata removal alone does not de-identify pixels.
+6. **Medium — uploads:** bounded application reads are present, but reverse-proxy/framework body limits, content-type versus magic-byte checks, decompression/concurrency limits, and cleanup after database failures need verification.
+7. **Medium — session lifecycle:** access/refresh JWTs are signed and typed; no server-side refresh-token rotation/revocation store was found. `/logout` does not revoke tokens at the API.
+8. **Medium - migrations:** startup now checks the applied Alembic revision and refuses to run if migrations are missing/outdated. Migrations `002_patient_owner` and `003_prediction_input_refs` have disposable-SQLite tests; PostgreSQL deployment execution remains unverified.
+9. **Medium — audit:** new event details are filtered before persistence and the read API is restricted to administrators/auditors. Existing rows are unchanged; audit writes remain ordinary SQL inserts, with no retention, immutability guard, or independently verified tamper-evidence.
+10. **Clinical limitations:** no clinical validation or regulatory/compliance assessment was found. Do not use real patient data or present this as a diagnostic device.
 
-## F. Security findings
+## 5. Verification results
 
-### Fixed in the local working copy
+| Check | Baseline | Current evidence |
+|---|---|---|
+| API/frontend startup | Earlier in this session both services returned 200 at `/health` and `/`; they were stopped at the user's request. | No server is running now. Startup checks Alembic migration state and refuses to start against a missing/outdated schema. |
+| Full backend suite | 141 passed, 6 failed, 14 skipped (161 collected); failures shared a missing-model error assertion. | `.venv\Scripts\python.exe -m pytest -q`: 177 passed, 14 skipped, 0 failed (191 collected), 30 warnings. Model-dependent tests skip because verified model artifacts are unavailable. |
+| Frontend lint | Blocked at baseline because ESLint 9 had no flat config. | `cd frontend && npm run lint` passes. |
+| Frontend build | Failed at baseline on a registration payload/type mismatch. | `cd frontend && npm run build` passes TypeScript and Vite; Vite warns the minified JS chunk is about 826 kB. |
+| Frontend tests | No test files at baseline. | `cd frontend && npm test -- --run`: 5 files, 10 tests passed. |
+| Ruff | Baseline broad lint reported 1,425 findings. | Focused Ruff `E9,F` check on `backend/app/config.py` and `tests/unit/test_config.py` passed; broad lint remains unaddressed. |
+| Mypy | Could not parse installed NumPy stubs because current Python typing syntax exceeded the configured target. | Not rerun; unresolved. |
+| Docker | Docker CLI is installed, but the Docker Desktop engine pipe is unavailable. | No Compose build/start was run. |
+| Migrations | Only the initial revision was present at baseline. | Additive revisions `002_patient_owner` and `003_prediction_input_refs` pass disposable SQLite migration tests in the backend suite. No production/local user database was migrated; PostgreSQL migration execution is unverified. |
+| Models | No promoted/verified model in tracked registry; ignored local files are not evidence of training or compatibility. | Inference remains fail-closed. No local checkpoint or private database was used for testing. |
 
-- **Privilege escalation at registration:** removed caller-selected role from the public schema and fixed the persisted role to clinician; added negative API tests.
-- **Unbounded application-level upload reads:** bounded image reads for both case uploads and direct inference; added unit tests.
-- **Model fallback and false model evidence:** removed random startup models and mock metrics; prevent implicit latest-version loading and block promotion of absent or checksum-mismatched artifacts.
-- **Misleading audit UI:** removed hard-coded audit rows and the unsupported compliance label.
+The API tests use isolated in-memory SQLite; migration tests use disposable temporary databases. The local `.env`, local `medfusion.db`, ignored model artifacts, and patient records were not modified.
 
-### Still open
+## 6. Changes in this implementation pass
 
-1. **High — patient/case/image IDOR and cross-user access:** authentication alone does not prove a requester may read or mutate a particular patient/case. The intended collaboration boundary (owner-only, team, or institution-wide) needs the product owner’s decision; do not deploy with sensitive real records until object-level checks and negative tests exist.
-2. **High — production configuration:** `DEBUG` defaults to true and secret/database settings include development placeholders. Production startup does not currently reject unsafe values.
-3. **High — audit assurance:** audit code is not an immutable or independently verifiable ledger; there is no audit API, retention design, or demonstrated control framework.
-4. **Medium — upload defense-in-depth:** bounded reads prevent an unbounded Python allocation, but reverse-proxy/framework request-body limits, concurrency limits, and MIME/magic-byte consistency still need deployment-level validation.
-5. **Medium — migrations:** application startup calls `Base.metadata.create_all()` instead of applying Alembic migrations. This is not a reproducible production schema-upgrade strategy.
-6. **Medium — session revocation, rate limiting, and retention:** verify actual deployment behavior and implement/validate server-side session invalidation and retention controls as required.
-7. **Compliance claims:** no HIPAA, GDPR, 21 CFR Part 11, or other formal compliance assessment was performed. Do not represent this prototype as compliant.
+- Added owner-only patient/case/nested-resource access checks and integration coverage for cross-user denial. Added patient ownership migration with conservative audit-based backfill; ambiguous legacy records remain unowned.
+- Added prediction references to the exact image and clinical-record versions, plus a file hash and clinical update timestamp. The case view hides results when current inputs no longer match those references.
+- Replaced automatic table creation with an explicit Alembic-head startup check. Added migration URL handling and disposable SQLite migration coverage.
+- Added clinical-record update support and corrected case-detail API/type mapping for saved records and predictions.
+- Removed clinical templates, random demographic defaults, fake quick-login buttons, unverified model-selection UI, fallback images, fabricated audit events, synthetic explanation baselines, probability-derived localization boxes, and default modality-gating values.
+- Protected image/heatmap downloads now use the authenticated API client. Removed storage file paths from frontend image summaries.
+- Corrected modality options and show upload quality feedback for the current session. Quality feedback is not persisted across reloads.
+- Added ESLint flat config and frontend tests; lint, production build, and all 10 Vitest tests pass. The build retains a large-chunk warning.
+- Revised disclaimer, review, prediction, explanation, audit and model UI labels to distinguish stored prototype outputs from validated clinical findings. Corrected explanation client URLs to match the backend routes and verified those paths in OpenAPI.
+- Added production configuration validation and focused tests; corrected Docker Compose so the backend uses the database service hostname instead of the host-development `localhost` URL. Compose execution remains unverified because Docker Desktop is unavailable.
+- Filtered new audit detail JSON through a technical-metadata allowlist; removed diagnosis text and case numbers from review audit details and case numbers/storage paths from application log messages. Existing database audit rows are unchanged.
+- Added a protected, read-only report-preview API and workstation panel. Previews include persisted input/version references and linked review records; stale model output is labeled, stored probabilities remain explicitly unverified, and the response cannot be finalized or delivered.
+- Latest integrated backend verification: 177 passed, 14 skipped, 0 failed (191 collected), with 30 warnings; the focused production settings tests cover 16 cases including redacted errors. Frontend lint/build and 6 files/12 tests pass.
 
-## G. How to run and verify
+These are local working-tree changes and are not committed.
 
-These are repository commands, **not commands verified in this environment**:
+## 7. Prioritized remaining implementation plan
 
-```bash
-# From the repository root, after creating a virtual environment and installing
-# backend/ML development dependencies from the repository's requirement files:
-pytest -q
-
-# Frontend: use the checked-in lockfile for a reproducible install.
-cd frontend
-npm ci
-npm run build
-npm run lint
-npm run test -- --run
-```
-
-For Docker Compose, copy `.env.example` to `.env`, replace development placeholders (especially database password and JWT secret), then use:
-
-```bash
-docker compose --env-file .env -f docker/docker-compose.yml config
-docker compose --env-file .env -f docker/docker-compose.yml up --build
-```
-
-These commands still need to be validated. Compose currently publishes PostgreSQL and the backend on host ports by default; restrict those ports before any shared or production deployment. See `DEPLOYMENT.md` and `TESTING.md` for current limitations.
-
-## H. Remaining work, ranked
-
-1. Decide the organization/team/record access model; enforce it in every patient, case, image, prediction, explanation, review, and report query; add cross-user negative tests.
-2. Build a clean dependency environment and run all tests, frontend build/lint, migrations, and Docker checks; fix genuine failures.
-3. Obtain the actual presentation PDF and product owner clarification for requirements not represented by the prompt text.
-4. Keep inference disabled until real artifacts, training/evaluation provenance, compatible preprocessing, and clinical-use limitations are documented and independently reviewed.
-5. Implement real audit-event retrieval/storage semantics and a report-generation/authorization workflow, with tests. Do not restore demo records or compliance labels.
-6. Replace startup `create_all()` with an explicit migration strategy and add production configuration validation, health/readiness checks, bounded request handling, and CI.
-7. Update architecture/API/dataset/deployment docs against verified behavior and add frontend tests.
-8. Perform formal privacy, security, clinical, and regulatory reviews before handling real patient data or making diagnostic claims.
-
-## I. Change summary
-
-The local working-copy edits cover the registration schema/service, inference service and upload routes, model registry/metadata, audit UI, auth/inference/upload tests and test helpers, plus the API, architecture, dataset, deployment, ML-pipeline, security, testing, model-card, changelog, and README documentation. They remain unpublished until a draft PR is approved and created.
+1. **Model integrity:** require compatible checksum-verified metadata and evaluation/preprocessing provenance before promotion; verify image/tabular pipelines; keep inference blocked until evidence exists. Do not load/promote ignored local artifacts without provenance.
+2. **Clinical workflow:** complete review finalization/revision semantics, ensure historical and new prediction/input linkage is complete, and add browser-driven workflow tests.
+3. **Audit and reports:** expand audit event coverage and define retention; add report artifact persistence, explicit finalization/signature controls, and authorized PDF delivery if required. Avoid immutability claims until technically enforced and independently evaluated.
+4. **Clinical preprocessing:** persist/version training-fitted encoders, scalers, and imputers; remove or validate arbitrary `raw_metrics` input.
+5. **Configuration and migrations:** production settings have focused unit coverage; exercise application startup under production configuration, validate migrations on PostgreSQL, and document backup/rollback behavior.
+6. **Uploads and reliability:** verify proxy-level request limits, storage/database rollback, retention, and concurrent upload/inference behavior.
+7. **Frontend:** complete pagination/filtering, verify critical flows in a browser, and split the large JS bundle based on measured route usage.
+8. **Deployment and documentation:** add CI and record exact results, remaining privacy limitations, and clinical/regulatory boundaries. Do not claim production readiness or clinical validation.

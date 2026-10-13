@@ -43,10 +43,10 @@ router = APIRouter(tags=["AI Prediction & Inference"])
     status_code=status.HTTP_201_CREATED,
     summary="Execute Case AI Prediction",
     description=(
-        "Trigger multimodal or unimodal AI diagnostic inference for a diagnostic case. "
-        "Fuses chest radiograph visual representations with structured clinical telemetry, "
-        "calibrates probabilities, computes uncertainty metrics, generates Grad-CAM/SHAP XAI artifacts, "
-        "advances case workflow state to COMPLETED, and enforces mandatory CDSS regulatory disclaimers."
+        "Request inference for a case using an explicitly supported input modality. The request "
+        "returns service unavailable unless a compatible model version is active and loadable. "
+        "Stored model outputs and optional attribution artifacts are not clinically validated; "
+        "calibration and uncertainty are not established by this prototype."
     ),
 )
 async def predict_case(
@@ -56,7 +56,7 @@ async def predict_case(
     current_user: User = Depends(require_clinical_staff),
     session: AsyncSession = Depends(get_db),
 ) -> PredictionResponse:
-    """Execute AI inference on a diagnostic case."""
+    """Request model inference for a diagnostic case."""
     service = AIInferenceService(session)
     payload = predict_data or CasePredictRequest()
     ip_addr = request.client.host if request.client else None
@@ -126,7 +126,7 @@ async def get_latest_case_prediction(
     response_model=PredictionResponse,
     status_code=status.HTTP_200_OK,
     summary="Get Prediction by ID",
-    description="Retrieve a specific AI prediction record including calibrated probabilities, uncertainty scores, and XAI artifacts.",
+    description="Retrieve the stored model-output record and any attribution artifacts that were actually generated. Calibration and uncertainty are not clinically validated.",
 )
 async def get_prediction_by_id(
     prediction_id: UUID,
@@ -163,6 +163,7 @@ async def list_predictions(
     """List prediction records across the platform."""
     service = AIInferenceService(session)
     return await service.list_predictions(
+        viewer_id=current_user.id,
         status=prediction_status,
         skip=skip,
         limit=limit,

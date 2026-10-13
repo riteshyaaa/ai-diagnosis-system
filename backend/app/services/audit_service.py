@@ -1,8 +1,7 @@
-"""
-MedFusion AI — Audit Trail & Compliance Service.
+"""Service for writing and querying application audit events.
 
-Provides a centralized service layer for logging compliance events,
-access trails, and clinical decisions to the immutable audit log table.
+The audit table is an ordinary mutable database table and does not by itself
+provide tamper-evidence, immutability, or regulatory compliance.
 """
 
 from datetime import datetime
@@ -15,7 +14,7 @@ from app.repositories.audit_log_repository import AuditLogRepository
 
 
 class AuditService:
-    """Service for creating and querying compliance audit trail records."""
+    """Service for creating and querying application audit events."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -32,7 +31,7 @@ class AuditService:
         details: Optional[Dict[str, Any]] = None,
     ) -> AuditLog:
         """
-        Record a compliance event in the append-only audit trail.
+        Record an application event in the audit table.
         """
         return await self.repository.log_event(
             action=action,
@@ -55,7 +54,7 @@ class AuditService:
         limit: int = 100,
     ) -> List[AuditLog]:
         """
-        Retrieve paginated audit trail logs matching compliance query filters.
+        Retrieve paginated audit events matching query filters.
         """
         return await self.repository.list_logs(
             user_id=user_id,
@@ -76,7 +75,7 @@ class AuditService:
         end_time: Optional[datetime] = None,
     ) -> int:
         """
-        Count total audit events matching compliance query filters.
+        Count audit events matching query filters.
         """
         return await self.repository.count_logs(
             user_id=user_id,

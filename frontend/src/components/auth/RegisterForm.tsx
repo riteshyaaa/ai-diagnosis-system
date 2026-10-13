@@ -6,7 +6,6 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Lock, Mail, User, AlertCircle, Activity } from "lucide-react";
 import { useAuthStore } from "../../stores/auth.store";
-import { UserRole } from "../../types";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 
 export const RegisterForm: React.FC = () => {
@@ -14,8 +13,7 @@ export const RegisterForm: React.FC = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState<UserRole>(UserRole.CLINICIAN);
-  const [department, setDepartment] = useState("Cardiology & Pulmonology");
+  const [department, setDepartment] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const { register, isLoading, error } = useAuthStore();
@@ -40,7 +38,6 @@ export const RegisterForm: React.FC = () => {
         full_name: fullName,
         email,
         password,
-        role,
         department,
       });
       navigate("/cases");
@@ -59,7 +56,7 @@ export const RegisterForm: React.FC = () => {
           Staff Registration
         </h2>
         <p className="mt-1 text-xs text-gray-500">
-          Enroll your licensed credentials into the MedFusion CDSS network
+          Create a clinician account. Professional credentials are not verified by this form.
         </p>
       </div>
 
@@ -72,7 +69,7 @@ export const RegisterForm: React.FC = () => {
 
       <form onSubmit={handleSubmit} className="mt-6 space-y-3.5">
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+          <label htmlFor="full-name" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
             Full Medical Name & Title
           </label>
           <div className="relative mt-1">
@@ -80,6 +77,7 @@ export const RegisterForm: React.FC = () => {
               <User className="h-4 w-4 text-gray-400" />
             </div>
             <input
+              id="full-name"
               type="text"
               required
               value={fullName}
@@ -91,7 +89,7 @@ export const RegisterForm: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+          <label htmlFor="email" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
             Institutional Email
           </label>
           <div className="relative mt-1">
@@ -99,6 +97,7 @@ export const RegisterForm: React.FC = () => {
               <Mail className="h-4 w-4 text-gray-400" />
             </div>
             <input
+              id="email"
               type="email"
               required
               value={email}
@@ -109,42 +108,24 @@ export const RegisterForm: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-              Clinical Role
-            </label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-            >
-              <option value={UserRole.CLINICIAN}>Clinician</option>
-              <option value={UserRole.RADIOLOGIST}>Radiologist</option>
-              <option value={UserRole.AUDITOR}>Auditor</option>
-              <option value={UserRole.ADMIN}>Administrator</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-              Department
-            </label>
-            <div className="relative mt-1">
-              <input
-                type="text"
-                required
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="Pulmonology"
-                className="block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-              />
-            </div>
+        <div>
+          <label htmlFor="department" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+            Department (optional)
+          </label>
+          <div className="relative mt-1">
+            <input
+              id="department"
+              type="text"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              placeholder="Pulmonology"
+              className="block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+          <label htmlFor="password" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
             Authorization Password
           </label>
           <div className="relative mt-1">
@@ -152,6 +133,7 @@ export const RegisterForm: React.FC = () => {
               <Lock className="h-4 w-4 text-gray-400" />
             </div>
             <input
+              id="password"
               type="password"
               required
               value={password}
@@ -163,7 +145,7 @@ export const RegisterForm: React.FC = () => {
         </div>
 
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+          <label htmlFor="confirm-password" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
             Confirm Password
           </label>
           <div className="relative mt-1">
@@ -171,6 +153,7 @@ export const RegisterForm: React.FC = () => {
               <Lock className="h-4 w-4 text-gray-400" />
             </div>
             <input
+              id="confirm-password"
               type="password"
               required
               value={confirmPassword}

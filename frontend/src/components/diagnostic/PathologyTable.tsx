@@ -1,9 +1,8 @@
 /**
- * MedFusion AI — 5-Label Thoracic Pathology Breakdown Table
+ * Displays pathology fields returned in a stored model response.
  */
 
 import React from "react";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { PathologyDetail } from "../../types";
 
 interface PathologyTableProps {
@@ -24,14 +23,14 @@ export const PathologyTable: React.FC<PathologyTableProps> = ({ findings }) => {
       <div className="flex items-center justify-between border-b border-gray-100 pb-3">
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-gray-900">
-            Multi-Label Thoracic Pathology Detection
+            Model-reported pathology findings
           </h3>
-          <p className="text-xs text-gray-500">
-            DenseNet-121 / ResNet-50 5-class multi-label sigmoidal probabilities
+            <p className="text-xs text-gray-500">
+            Stored model outputs; model provenance and thresholds have not been clinically validated.
           </p>
         </div>
         <span className="rounded-full bg-primary-50 px-2.5 py-0.5 text-[10px] font-bold text-primary-700">
-          5 Clinical Targets
+          {findings.length} {findings.length === 1 ? "finding" : "findings"}
         </span>
       </div>
 
@@ -40,17 +39,16 @@ export const PathologyTable: React.FC<PathologyTableProps> = ({ findings }) => {
           <thead className="bg-gray-50 font-bold uppercase tracking-wider text-gray-600">
             <tr>
               <th className="px-4 py-3">Pathology Target</th>
-              <th className="px-4 py-3">Probability</th>
-              <th className="px-4 py-3">Threshold</th>
+              <th className="px-4 py-3">Reported output</th>
+              <th className="px-4 py-3">Stored model threshold</th>
               <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Severity Indicator</th>
+              <th className="px-4 py-3">Model band</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 bg-white">
             {findings.map((item, idx) => {
               const percent = (item.probability * 100).toFixed(1);
-              const isPositive = item.positive ?? item.probability >= (item.threshold || 0.5);
-              const thresholdPercent = ((item.threshold || 0.5) * 100).toFixed(0);
+              const thresholdPercent = (item.threshold * 100).toFixed(0);
 
               return (
                 <tr key={idx} className="hover:bg-gray-50/75 transition-colors">
@@ -64,34 +62,12 @@ export const PathologyTable: React.FC<PathologyTableProps> = ({ findings }) => {
                     &ge; {thresholdPercent}%
                   </td>
                   <td className="px-4 py-3">
-                    {isPositive ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-700 border border-rose-200">
-                        <AlertCircle className="h-3 w-3" /> Positive Finding
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 border border-emerald-100">
-                        <CheckCircle2 className="h-3 w-3" /> Negative / Normal
-                      </span>
-                    )}
+                    <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                      {item.positive ? "Model flag: positive" : "Model flag: negative"}
+                    </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 w-24 overflow-hidden rounded-full bg-gray-100">
-                        <div
-                          className={`h-full rounded-full ${
-                            item.probability >= 0.7
-                              ? "bg-rose-500"
-                              : item.probability >= 0.4
-                              ? "bg-amber-500"
-                              : "bg-emerald-500"
-                          }`}
-                          style={{ width: `${Math.min(item.probability * 100, 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-gray-400 capitalize">
-                        {item.confidence_band || (item.probability >= 0.7 ? "High" : item.probability >= 0.4 ? "Moderate" : "Low")}
-                      </span>
-                    </div>
+                  <td className="px-4 py-3 text-gray-600 capitalize">
+                    {item.confidence_band ? `Reported: ${item.confidence_band}` : "Unavailable"}
                   </td>
                 </tr>
               );

@@ -14,9 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.clinical_review import ReviewDecision
 
 CLINICAL_DISCLAIMER_TEXT = (
-    "MedFusion AI is an assistive Clinical Decision Support System (CDSS) and "
-    "does not provide autonomous medical diagnosis. All diagnostic findings "
-    "require licensed physician verification and clinical oversight."
+    "MedFusion AI is an engineering prototype without demonstrated clinical validation. "
+    "Review records do not establish clinical correctness, digital-signature status, or regulatory compliance."
 )
 
 
@@ -80,7 +79,7 @@ class ClinicalReviewResponse(BaseModel):
     concordance: Optional[bool] = None
     clinical_disclaimer: str = Field(
         default=CLINICAL_DISCLAIMER_TEXT,
-        description="Mandatory regulatory CDSS notice",
+        description="Prototype limitation notice",
     )
 
 
@@ -115,5 +114,5 @@ class ClinicalReviewStatsResponse(BaseModel):
     )
     clinical_disclaimer: str = Field(
         default=CLINICAL_DISCLAIMER_TEXT,
-        description="Mandatory regulatory CDSS notice",
+        description="Prototype limitation notice",
     )

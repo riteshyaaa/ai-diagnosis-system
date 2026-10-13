@@ -24,7 +24,12 @@ from app.models.patient import Patient, BiologicalSex
 from app.models.diagnostic_case import DiagnosticCase, CaseModality, CaseStatus
 from app.models.image_record import ImageRecord, ImageType
 from app.models.clinical_record import ClinicalRecord
-from app.models.prediction_record import PredictionRecord, ModelType, PredictionStatus, ConfidenceBand
+from app.models.prediction_record import (
+    PredictionRecord,
+    ModelType,
+    PredictionStatus,
+    ConfidenceBand,
+)
 from app.models.explanation_record import ExplanationRecord, ExplanationType
 from app.models.clinical_review import ClinicalReview, ReviewDecision
 from app.models.audit_log import AuditAction, AuditResourceType
@@ -43,6 +48,7 @@ from app.security.password import hash_password
 # ---------------------------------------------------------------------------
 # UserRepository Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_user_repository_crud_and_lockout(db_session: AsyncSession):
@@ -72,7 +78,9 @@ async def test_user_repository_crud_and_lockout(db_session: AsyncSession):
 
     # Test failed login attempts increment
     for i in range(1, 5):
-        await repo.record_failed_login(found, max_attempts=5, lockout_duration_seconds=900)
+        await repo.record_failed_login(
+            found, max_attempts=5, lockout_duration_seconds=900
+        )
         assert found.failed_login_attempts == i
         assert found.locked_until is None
 
@@ -95,10 +103,20 @@ async def test_user_repository_crud_and_lockout(db_session: AsyncSession):
 # PatientRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_patient_repository_mrn_hash_and_filter(db_session: AsyncSession):
     """Test privacy-preserving MRN hashing, lookup, and demographic filtering."""
     repo = PatientRepository(db_session)
+    user_repo = UserRepository(db_session)
+    creator = await user_repo.create(
+        User(
+            email="patient.owner@medfusion.local",
+            hashed_password=hash_password("DocSecure2026!"),
+            full_name="Patient Owner",
+            role=UserRole.CLINICIAN,
+        )
+    )
 
     raw_mrn = "MRN-TEST-998811"
     mrn_hash = hashlib.sha256(raw_mrn.encode("utf-8")).hexdigest()
@@ -107,11 +125,13 @@ async def test_patient_repository_mrn_hash_and_filter(db_session: AsyncSession):
         mrn_hash=mrn_hash,
         age=58,
         sex=BiologicalSex.FEMALE,
+        created_by_id=creator.id,
     )
     patient2 = Patient(
         mrn_hash=hashlib.sha256("MRN-TEST-998822".encode("utf-8")).hexdigest(),
         age=42,
         sex=BiologicalSex.MALE,
+        created_by_id=creator.id,
     )
     await repo.create(patient1)
     await repo.create(patient2)
@@ -123,11 +143,15 @@ async def test_patient_repository_mrn_hash_and_filter(db_session: AsyncSession):
     assert fetched.sex == BiologicalSex.FEMALE
 
     # Filter by demographic attributes
-    females = await repo.filter_patients(sex=BiologicalSex.FEMALE)
+    females = await repo.filter_patients(
+        creator_id=creator.id, sex=BiologicalSex.FEMALE
+    )
     assert len(females) == 1
     assert females[0].mrn_hash == mrn_hash
 
-    age_filtered = await repo.filter_patients(min_age=50, max_age=65)
+    age_filtered = await repo.filter_patients(
+        creator_id=creator.id, min_age=50, max_age=65
+    )
     assert len(age_filtered) == 1
     assert age_filtered[0].age == 58
 
@@ -136,6 +160,7 @@ async def test_patient_repository_mrn_hash_and_filter(db_session: AsyncSession):
 # CaseRepository & Full Relational Graph Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_case_repository_and_eager_loading(db_session: AsyncSession):
     """Test diagnostic case lifecycle and full relational graph retrieval."""
@@ -143,27 +168,33 @@ async def test_case_repository_and_eager_loading(db_session: AsyncSession):
     patient_repo = PatientRepository(db_session)
     case_repo = CaseRepository(db_session)
 
-    clinician = await user_repo.create(User(
-        email="dr.case@medfusion.local",
-        hashed_password=hash_password("DocSecure2026!"),
-        full_name="Dr. Case Tester",
-        role=UserRole.CLINICIAN,
-    ))
+    clinician = await user_repo.create(
+        User(
+            email="dr.case@medfusion.local",
+            hashed_password=hash_password("DocSecure2026!"),
+            full_name="Dr. Case Tester",
+            role=UserRole.CLINICIAN,
+        )
+    )
 
-    patient = await patient_repo.create(Patient(
-        mrn_hash=hashlib.sha256("MRN-CASE-001".encode("utf-8")).hexdigest(),
-        age=64,
-        sex=BiologicalSex.MALE,
-    ))
+    patient = await patient_repo.create(
+        Patient(
+            mrn_hash=hashlib.sha256("MRN-CASE-001".encode("utf-8")).hexdigest(),
+            age=64,
+            sex=BiologicalSex.MALE,
+        )
+    )
 
-    case = await case_repo.create(DiagnosticCase(
-        case_number="CASE-2026-TEST-001",
-        patient_id=patient.id,
-        created_by_id=clinician.id,
-        modality=CaseModality.MULTIMODAL,
-        status=CaseStatus.DRAFT,
-        chief_complaint="Acute onset exertional dyspnea and retrosternal chest pressure.",
-    ))
+    case = await case_repo.create(
+        DiagnosticCase(
+            case_number="CASE-2026-TEST-001",
+            patient_id=patient.id,
+            created_by_id=clinician.id,
+            modality=CaseModality.MULTIMODAL,
+            status=CaseStatus.DRAFT,
+            chief_complaint="Acute onset exertional dyspnea and retrosternal chest pressure.",
+        )
+    )
 
     assert case.id is not None
     assert case.case_number == "CASE-2026-TEST-001"
@@ -183,7 +214,9 @@ async def test_case_repository_and_eager_loading(db_session: AsyncSession):
     assert patient_cases[0].id == case.id
 
     # List by clinician
-    clinician_cases = await case_repo.list_by_clinician(clinician.id, status=CaseStatus.DRAFT)
+    clinician_cases = await case_repo.list_by_clinician(
+        clinician.id, status=CaseStatus.DRAFT
+    )
     assert len(clinician_cases) == 1
 
     # Test full details eager loading
@@ -197,6 +230,7 @@ async def test_case_repository_and_eager_loading(db_session: AsyncSession):
 # ImageRecordRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_image_repository(db_session: AsyncSession):
     """Test image storage metadata, SHA-256 deduplication, and case linkage."""
@@ -205,24 +239,30 @@ async def test_image_repository(db_session: AsyncSession):
     case_repo = CaseRepository(db_session)
     img_repo = ImageRepository(db_session)
 
-    user = await user_repo.create(User(
-        email="rad.test@medfusion.local",
-        hashed_password=hash_password("RadSecure2026!"),
-        full_name="Dr. Rad Tester",
-        role=UserRole.RADIOLOGIST,
-    ))
-    patient = await patient_repo.create(Patient(
-        mrn_hash=hashlib.sha256("MRN-IMG-001".encode("utf-8")).hexdigest(),
-        age=50,
-        sex=BiologicalSex.FEMALE,
-    ))
-    case = await case_repo.create(DiagnosticCase(
-        case_number="CASE-IMG-001",
-        patient_id=patient.id,
-        created_by_id=user.id,
-        modality=CaseModality.IMAGE_ONLY,
-        status=CaseStatus.DRAFT,
-    ))
+    user = await user_repo.create(
+        User(
+            email="rad.test@medfusion.local",
+            hashed_password=hash_password("RadSecure2026!"),
+            full_name="Dr. Rad Tester",
+            role=UserRole.RADIOLOGIST,
+        )
+    )
+    patient = await patient_repo.create(
+        Patient(
+            mrn_hash=hashlib.sha256("MRN-IMG-001".encode("utf-8")).hexdigest(),
+            age=50,
+            sex=BiologicalSex.FEMALE,
+        )
+    )
+    case = await case_repo.create(
+        DiagnosticCase(
+            case_number="CASE-IMG-001",
+            patient_id=patient.id,
+            created_by_id=user.id,
+            modality=CaseModality.IMAGE_ONLY,
+            status=CaseStatus.DRAFT,
+        )
+    )
 
     sha256_mock = hashlib.sha256(b"mock_cxr_image_bytes_content").hexdigest()
     image = ImageRecord(
@@ -260,6 +300,7 @@ async def test_image_repository(db_session: AsyncSession):
 # ClinicalRecordRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_clinical_record_repository(db_session: AsyncSession):
     """Test structured tabular clinical record storage and history retrieval."""
@@ -268,24 +309,30 @@ async def test_clinical_record_repository(db_session: AsyncSession):
     case_repo = CaseRepository(db_session)
     clin_repo = ClinicalRecordRepository(db_session)
 
-    user = await user_repo.create(User(
-        email="clin.table@medfusion.local",
-        hashed_password=hash_password("DocSecure2026!"),
-        full_name="Dr. Table Tester",
-        role=UserRole.CLINICIAN,
-    ))
-    patient = await patient_repo.create(Patient(
-        mrn_hash=hashlib.sha256("MRN-TAB-001".encode("utf-8")).hexdigest(),
-        age=60,
-        sex=BiologicalSex.MALE,
-    ))
-    case = await case_repo.create(DiagnosticCase(
-        case_number="CASE-TAB-001",
-        patient_id=patient.id,
-        created_by_id=user.id,
-        modality=CaseModality.TABULAR_ONLY,
-        status=CaseStatus.DRAFT,
-    ))
+    user = await user_repo.create(
+        User(
+            email="clin.table@medfusion.local",
+            hashed_password=hash_password("DocSecure2026!"),
+            full_name="Dr. Table Tester",
+            role=UserRole.CLINICIAN,
+        )
+    )
+    patient = await patient_repo.create(
+        Patient(
+            mrn_hash=hashlib.sha256("MRN-TAB-001".encode("utf-8")).hexdigest(),
+            age=60,
+            sex=BiologicalSex.MALE,
+        )
+    )
+    case = await case_repo.create(
+        DiagnosticCase(
+            case_number="CASE-TAB-001",
+            patient_id=patient.id,
+            created_by_id=user.id,
+            modality=CaseModality.TABULAR_ONLY,
+            status=CaseStatus.DRAFT,
+        )
+    )
 
     clin_record = ClinicalRecord(
         case_id=case.id,
@@ -318,6 +365,7 @@ async def test_clinical_record_repository(db_session: AsyncSession):
 # PredictionRepository & ExplanationRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_prediction_and_explanation_repositories(db_session: AsyncSession):
     """Test AI inference outputs, uncertainty metrics, and XAI artifacts."""
@@ -327,24 +375,30 @@ async def test_prediction_and_explanation_repositories(db_session: AsyncSession)
     pred_repo = PredictionRepository(db_session)
     exp_repo = ExplanationRepository(db_session)
 
-    user = await user_repo.create(User(
-        email="ai.tester@medfusion.local",
-        hashed_password=hash_password("DocSecure2026!"),
-        full_name="Dr. AI Supervisor",
-        role=UserRole.CLINICIAN,
-    ))
-    patient = await patient_repo.create(Patient(
-        mrn_hash=hashlib.sha256("MRN-AI-001".encode("utf-8")).hexdigest(),
-        age=55,
-        sex=BiologicalSex.FEMALE,
-    ))
-    case = await case_repo.create(DiagnosticCase(
-        case_number="CASE-AI-001",
-        patient_id=patient.id,
-        created_by_id=user.id,
-        modality=CaseModality.MULTIMODAL,
-        status=CaseStatus.PROCESSING,
-    ))
+    user = await user_repo.create(
+        User(
+            email="ai.tester@medfusion.local",
+            hashed_password=hash_password("DocSecure2026!"),
+            full_name="Dr. AI Supervisor",
+            role=UserRole.CLINICIAN,
+        )
+    )
+    patient = await patient_repo.create(
+        Patient(
+            mrn_hash=hashlib.sha256("MRN-AI-001".encode("utf-8")).hexdigest(),
+            age=55,
+            sex=BiologicalSex.FEMALE,
+        )
+    )
+    case = await case_repo.create(
+        DiagnosticCase(
+            case_number="CASE-AI-001",
+            patient_id=patient.id,
+            created_by_id=user.id,
+            modality=CaseModality.MULTIMODAL,
+            status=CaseStatus.PROCESSING,
+        )
+    )
 
     prediction = PredictionRecord(
         case_id=case.id,
@@ -373,7 +427,11 @@ async def test_prediction_and_explanation_repositories(db_session: AsyncSession)
             "age": 0.12,
         },
         top_features=[
-            {"feature": "serum_cholesterol", "importance": 0.28, "direction": "elevating"},
+            {
+                "feature": "serum_cholesterol",
+                "importance": 0.28,
+                "direction": "elevating",
+            },
             {"feature": "resting_bp", "importance": 0.22, "direction": "elevating"},
         ],
         summary_text="Model focused on cardiac silhouette apex and elevated serum cholesterol.",
@@ -385,7 +443,9 @@ async def test_prediction_and_explanation_repositories(db_session: AsyncSession)
     pred_with_exp = await pred_repo.get_with_explanation(saved_pred.id)
     assert pred_with_exp is not None
     assert pred_with_exp.explanation is not None
-    assert pred_with_exp.explanation.heatmap_path == "/uploads/xai/case_ai_001_gradcam.png"
+    assert (
+        pred_with_exp.explanation.heatmap_path == "/uploads/xai/case_ai_001_gradcam.png"
+    )
     assert pred_with_exp.explanation.shap_values["serum_cholesterol"] == 0.28
 
     # Fetch explanation by prediction ID
@@ -398,6 +458,7 @@ async def test_prediction_and_explanation_repositories(db_session: AsyncSession)
 # ClinicalReviewRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_clinical_review_repository(db_session: AsyncSession):
     """Test human-in-the-loop review decision tracking and mandatory rationale."""
@@ -407,37 +468,45 @@ async def test_clinical_review_repository(db_session: AsyncSession):
     pred_repo = PredictionRepository(db_session)
     review_repo = ClinicalReviewRepository(db_session)
 
-    reviewer = await user_repo.create(User(
-        email="dr.senior@medfusion.local",
-        hashed_password=hash_password("DocSecure2026!"),
-        full_name="Dr. Senior Reviewer",
-        role=UserRole.CLINICIAN,
-    ))
-    patient = await patient_repo.create(Patient(
-        mrn_hash=hashlib.sha256("MRN-REV-001".encode("utf-8")).hexdigest(),
-        age=71,
-        sex=BiologicalSex.MALE,
-    ))
-    case = await case_repo.create(DiagnosticCase(
-        case_number="CASE-REV-001",
-        patient_id=patient.id,
-        created_by_id=reviewer.id,
-        modality=CaseModality.MULTIMODAL,
-        status=CaseStatus.PROCESSING,
-    ))
-    pred = await pred_repo.create(PredictionRecord(
-        case_id=case.id,
-        model_type=ModelType.MULTIMODAL_FUSION,
-        model_version="multimodal_late_fusion_v1.0.0",
-        primary_condition="Cardiomegaly",
-        raw_probability=0.86,
-        calibrated_probability=0.88,
-        confidence_score=0.88,
-        confidence_band=ConfidenceBand.HIGH,
-        status=PredictionStatus.CONFIDENT,
-        detailed_predictions={"Cardiomegaly": 0.88},
-        inference_latency_ms=130.0,
-    ))
+    reviewer = await user_repo.create(
+        User(
+            email="dr.senior@medfusion.local",
+            hashed_password=hash_password("DocSecure2026!"),
+            full_name="Dr. Senior Reviewer",
+            role=UserRole.CLINICIAN,
+        )
+    )
+    patient = await patient_repo.create(
+        Patient(
+            mrn_hash=hashlib.sha256("MRN-REV-001".encode("utf-8")).hexdigest(),
+            age=71,
+            sex=BiologicalSex.MALE,
+        )
+    )
+    case = await case_repo.create(
+        DiagnosticCase(
+            case_number="CASE-REV-001",
+            patient_id=patient.id,
+            created_by_id=reviewer.id,
+            modality=CaseModality.MULTIMODAL,
+            status=CaseStatus.PROCESSING,
+        )
+    )
+    pred = await pred_repo.create(
+        PredictionRecord(
+            case_id=case.id,
+            model_type=ModelType.MULTIMODAL_FUSION,
+            model_version="multimodal_late_fusion_v1.0.0",
+            primary_condition="Cardiomegaly",
+            raw_probability=0.86,
+            calibrated_probability=0.88,
+            confidence_score=0.88,
+            confidence_band=ConfidenceBand.HIGH,
+            status=PredictionStatus.CONFIDENT,
+            detailed_predictions={"Cardiomegaly": 0.88},
+            inference_latency_ms=130.0,
+        )
+    )
 
     review = ClinicalReview(
         case_id=case.id,
@@ -456,7 +525,11 @@ async def test_clinical_review_repository(db_session: AsyncSession):
     assert case_reviews[0].reviewer.full_name == "Dr. Senior Reviewer"
 
     # Query reviews by reviewer
-    reviewer_reviews = await review_repo.list_by_reviewer(reviewer.id, decision=ReviewDecision.ACCEPT)
+    reviewer_reviews = await review_repo.list_by_reviewer(
+        reviewer.id,
+        owner_id=reviewer.id,
+        decision=ReviewDecision.ACCEPT,
+    )
     assert len(reviewer_reviews) == 1
 
 
@@ -464,18 +537,21 @@ async def test_clinical_review_repository(db_session: AsyncSession):
 # AuditLogRepository Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_audit_log_repository_and_compliance_trail(db_session: AsyncSession):
-    """Test append-only immutable audit trail and multi-criteria queries."""
+async def test_audit_log_repository_and_filtered_events(db_session: AsyncSession):
+    """Test audit-event persistence and multi-criteria queries."""
     user_repo = UserRepository(db_session)
     audit_repo = AuditLogRepository(db_session)
 
-    auditor = await user_repo.create(User(
-        email="auditor.test@medfusion.local",
-        hashed_password=hash_password("AuditSecure2026!"),
-        full_name="Auditor Compliance Officer",
-        role=UserRole.AUDITOR,
-    ))
+    auditor = await user_repo.create(
+        User(
+            email="auditor.test@medfusion.local",
+            hashed_password=hash_password("AuditSecure2026!"),
+            full_name="Auditor Compliance Officer",
+            role=UserRole.AUDITOR,
+        )
+    )
 
     # Log several events
     await audit_repo.log_event(
@@ -520,3 +596,24 @@ async def test_audit_log_repository_and_compliance_trail(db_session: AsyncSessio
     assert logs[0].action == AuditAction.INFERENCE_RUN
     assert logs[0].details["latency_ms"] == 145.2
     assert logs[0].user.full_name == "Auditor Compliance Officer"
+
+
+@pytest.mark.asyncio
+async def test_audit_log_repository_discards_clinical_details(db_session: AsyncSession):
+    audit_repo = AuditLogRepository(db_session)
+
+    event = await audit_repo.log_event(
+        action=AuditAction.REVIEW_SUBMIT,
+        resource_type=AuditResourceType.REVIEW,
+        resource_id="review-reference",
+        details={
+            "decision": "ACCEPT",
+            "old_status": "COMPLETED",
+            "case_number": "CASE-2026-SECRET",
+            "modified_diagnosis": "Sensitive diagnosis text",
+            "clinical_notes": "Sensitive clinician notes",
+            "user_supplied": "must not be persisted",
+        },
+    )
+
+    assert event.details == {"decision": "accept", "old_status": "completed"}

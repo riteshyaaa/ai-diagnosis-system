@@ -27,11 +27,13 @@ from app.schemas.case import (
     CaseStatusUpdate,
     CaseUpdate,
 )
+from app.schemas.report import CaseReportPreviewResponse
 from app.security.dependencies import (
     get_current_user,
     require_clinician,
 )
 from app.services.case_service import CaseService
+from app.services.case_report_service import CaseReportService
 
 router = APIRouter(prefix="/cases", tags=["Diagnostic Cases"])
 
@@ -69,7 +71,9 @@ async def create_case(
     description="Query and paginate diagnostic cases with multi-criteria filtering by status, modality, patient, or clinician.",
 )
 async def list_cases(
-    case_status: Optional[CaseStatus] = Query(None, alias="status", description="Filter by workflow status"),
+    case_status: Optional[CaseStatus] = Query(
+        None, alias="status", description="Filter by workflow status"
+    ),
     modality: Optional[CaseModality] = Query(None, description="Filter by case modality"),
     patient_id: Optional[UUID] = Query(None, description="Filter by patient ID"),
     clinician_id: Optional[UUID] = Query(None, description="Filter by creating clinician ID"),
@@ -81,6 +85,7 @@ async def list_cases(
     """List and filter diagnostic cases."""
     service = CaseService(session)
     return await service.list_cases(
+        viewer_id=current_user.id,
         status=case_status,
         modality=modality,
         patient_id=patient_id,
@@ -133,6 +138,34 @@ async def get_case_details(
     ip_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
     return await service.get_case_details(
+        case_id=case_id,
+        viewer_id=current_user.id,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+
+
+@router.get(
+    "/{case_id}/report-preview",
+    response_model=CaseReportPreviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate a Draft Report Preview",
+    description=(
+        "Build an owner-scoped preview from persisted case inputs, model output, and review records. "
+        "The response is not a finalized or signed clinical report."
+    ),
+)
+async def get_case_report_preview(
+    case_id: UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> CaseReportPreviewResponse:
+    """Generate a read-only report preview from the current persisted case snapshot."""
+    service = CaseReportService(session)
+    ip_addr = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    return await service.get_preview(
         case_id=case_id,
         viewer_id=current_user.id,
         ip_address=ip_addr,

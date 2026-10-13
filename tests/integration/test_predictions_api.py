@@ -18,16 +18,23 @@ Comprehensive test suite verifying:
 
 import io
 import json
-import numpy as np
+from uuid import UUID, uuid4
 import pytest
 from PIL import Image
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.clinical_review import ClinicalReview, ReviewDecision
+from app.models.explanation_record import ExplanationRecord, ExplanationType
+from app.models.prediction_record import (
+    ConfidenceBand,
+    ModelType,
+    PredictionRecord,
+    PredictionStatus,
+)
 from app.models.user import User, UserRole
 from app.security.password import hash_password
 from tests.unit.test_image_processing import (
-    create_synthetic_dicom_bytes,
     create_synthetic_radiograph,
 )
 
@@ -259,6 +266,119 @@ async def test_direct_realtime_prediction_upload(client: AsyncClient):
     res = await client.post("/api/v1/predictions/direct-upload", files=files, data=data, headers=headers)
     assert res.status_code == 503
     assert "model not found" in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_prediction_review_and_explanation_reads_are_case_scoped(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
+    """A different authenticated user cannot read a case's derived records."""
+    owner_token = await get_clinician_token(client, "dr.records.owner@hospital.org")
+    other_token = await get_clinician_token(client, "dr.records.other@hospital.org")
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    patient_response = await client.post(
+        "/api/v1/patients",
+        json={"mrn": "MRN-RECORD-SCOPE", "age": 55, "sex": "female"},
+        headers=owner_headers,
+    )
+    assert patient_response.status_code == 201
+    case_response = await client.post(
+        "/api/v1/cases",
+        json={"patient_id": patient_response.json()["id"], "modality": "tabular_only"},
+        headers=owner_headers,
+    )
+    assert case_response.status_code == 201
+
+    case_id = case_response.json()["id"]
+    owner_user_response = await client.get("/api/v1/auth/me", headers=owner_headers)
+    assert owner_user_response.status_code == 200
+    prediction = PredictionRecord(
+        case_id=UUID(case_id),
+        model_type=ModelType.TABULAR_MLP,
+        model_version="test-fixture-only",
+        primary_condition="test fixture",
+        raw_probability=0.5,
+        calibrated_probability=0.5,
+        confidence_score=0.5,
+        confidence_band=ConfidenceBand.LOW,
+        status=PredictionStatus.UNCERTAIN,
+        detailed_predictions={"fixture": True},
+        inference_latency_ms=0.0,
+        explanation=ExplanationRecord(
+            explanation_type=ExplanationType.SHAP_FEATURE_IMPORTANCE,
+            shap_values={"fixture": 0.0},
+        ),
+    )
+    db_session.add(prediction)
+    await db_session.flush()
+    review = ClinicalReview(
+        case_id=UUID(case_id),
+        prediction_id=prediction.id,
+        reviewer_id=UUID(owner_user_response.json()["id"]),
+        decision=ReviewDecision.REJECT,
+        clinical_notes="Synthetic fixture for authorization test only.",
+    )
+    db_session.add(review)
+    await db_session.commit()
+
+    prediction_id = str(prediction.id)
+    review_id = str(review.id)
+
+    owner_detail = await client.get(
+        f"/api/v1/cases/{case_id}/details", headers=owner_headers
+    )
+    assert owner_detail.status_code == 200
+    returned_prediction = owner_detail.json()["predictions"][0]
+    assert returned_prediction["id"] == prediction_id
+    assert returned_prediction["image_record_id"] is None
+    assert returned_prediction["clinical_record_id"] is None
+    assert "uncertainty" in returned_prediction
+    assert returned_prediction["pathology_findings"] == []
+
+    assert (await client.get(f"/api/v1/predictions/{prediction_id}", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/cases/{case_id}/predictions", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/predictions/{prediction_id}/explanation", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/cases/{case_id}/explanations", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/cases/{case_id}/reviews", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/predictions/{prediction_id}/reviews", headers=other_headers)).status_code == 404
+    assert (await client.get(f"/api/v1/reviews/{review_id}", headers=other_headers)).status_code == 404
+
+    review_list = await client.get(
+        f"/api/v1/reviews?case_id={case_id}", headers=other_headers
+    )
+    assert review_list.status_code == 200
+    assert review_list.json() == {"total": 0, "items": []}
+
+
+@pytest.mark.asyncio
+async def test_case_prediction_rejects_incompatible_selected_modality(client: AsyncClient):
+    token = await get_clinician_token(client, "dr.modality.scope@hospital.org")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for modality, incompatible_field, mrn in (
+        ("image_only", "selected_clinical_record_id", "MRN-MODALITY-IMAGE"),
+        ("tabular_only", "selected_image_id", "MRN-MODALITY-TABULAR"),
+    ):
+        patient = await client.post(
+            "/api/v1/patients",
+            json={"mrn": mrn, "age": 40, "sex": "unknown"},
+            headers=headers,
+        )
+        case = await client.post(
+            "/api/v1/cases",
+            json={"patient_id": patient.json()["id"], "modality": modality},
+            headers=headers,
+        )
+        response = await client.post(
+            f"/api/v1/cases/{case.json()['id']}/predict",
+            json={incompatible_field: str(uuid4())},
+            headers=headers,
+        )
+        assert response.status_code == 422
+        assert "case" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio

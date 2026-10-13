@@ -2,7 +2,7 @@
  * MedFusion AI — Interactive Radiograph Viewer with Grad-CAM Heatmap Blending & Attention Overlays
  */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Layers,
   Sliders,
@@ -12,56 +12,113 @@ import {
   Maximize2,
   ZoomIn,
   ZoomOut,
+  AlertCircle,
 } from "lucide-react";
-import { VisualExplanationResponse, ImageRecord } from "../../types";
+import type { VisualExplanationResponse, ImageRecordSummary, ImageQualityReport } from "../../types";
 import { explanationService } from "../../services/explanations.service";
 import { imageService } from "../../services/images.service";
 import { LoadingSpinner } from "../common/LoadingSpinner";
+import { apiErrorMessage } from "../../utils/apiError";
 
 interface RadiographViewerProps {
-  image?: ImageRecord | null;
+  image?: ImageRecordSummary | null;
+  qualityReport?: ImageQualityReport | null;
   visualExplanation?: VisualExplanationResponse | null;
   predictionId?: string;
+  availablePathologies?: string[];
   onGradCamUpdated?: (updated: VisualExplanationResponse) => void;
 }
 
-const THORACIC_PATHOLOGIES = [
-  "Atelectasis",
-  "Cardiomegaly",
-  "Effusion",
-  "Infiltration",
-  "Mass",
-];
-
 export const RadiographViewer: React.FC<RadiographViewerProps> = ({
   image,
+  qualityReport,
   visualExplanation,
   predictionId,
+  availablePathologies = [],
   onGradCamUpdated,
 }) => {
   const [opacity, setOpacity] = useState<number>(55); // 0 - 100
   const [showHeatmap, setShowHeatmap] = useState<boolean>(true);
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
-  const [selectedPathology, setSelectedPathology] = useState<string>("Cardiomegaly");
+  const [selectedPathology, setSelectedPathology] = useState<string>(availablePathologies[0] ?? "");
   const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [recalculationError, setRecalculationError] = useState<string | null>(null);
+  const [rawImageUrl, setRawImageUrl] = useState<string | null>(null);
+  const [imageLoadError, setImageLoadError] = useState<string | null>(null);
+  const [remoteHeatmapUrl, setRemoteHeatmapUrl] = useState<string | null>(null);
+  const [heatmapLoadError, setHeatmapLoadError] = useState<string | null>(null);
 
-  const rawImageUrl = image?.id
-    ? imageService.getImageDownloadUrl(image.id)
-    : "https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=800&q=80";
+  useEffect(() => {
+    if (!availablePathologies.includes(selectedPathology)) {
+      setSelectedPathology(availablePathologies[0] ?? "");
+    }
+  }, [availablePathologies, selectedPathology]);
+
+  useEffect(() => {
+    const imageId = image?.id;
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    setRawImageUrl(null);
+    setImageLoadError(null);
+    if (!imageId) return () => controller.abort();
+
+    imageService.downloadImage(imageId, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setRawImageUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setImageLoadError(apiErrorMessage(error, "Image could not be loaded."));
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [image?.id]);
 
   // Check if visual explanation has heatmap data
-  const heatmapData = visualExplanation?.heatmap_base64
+  const inlineHeatmap = visualExplanation?.heatmap_base64
     ? visualExplanation.heatmap_base64.startsWith("data:")
       ? visualExplanation.heatmap_base64
       : `data:image/png;base64,${visualExplanation.heatmap_base64}`
-    : visualExplanation?.heatmap_url || null;
+    : null;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | undefined;
+    setRemoteHeatmapUrl(null);
+    setHeatmapLoadError(null);
+    if (inlineHeatmap || !visualExplanation?.heatmap_url || !predictionId) {
+      return () => controller.abort();
+    }
+
+    explanationService.downloadHeatmap(predictionId, controller.signal)
+      .then((blob) => {
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setRemoteHeatmapUrl(objectUrl);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setHeatmapLoadError(apiErrorMessage(error, "Model attribution could not be loaded."));
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [inlineHeatmap, predictionId, visualExplanation?.heatmap_url]);
+
+  const heatmapData = inlineHeatmap || remoteHeatmapUrl;
 
   const boundingBoxes = visualExplanation?.attention_regions || [];
 
   const handleRecalculate = async () => {
-    if (!predictionId) return;
+    if (!predictionId || !selectedPathology) return;
     setIsRecalculating(true);
+    setRecalculationError(null);
     try {
       const response = await explanationService.recalculatePathologySaliency(predictionId, {
         target_pathology: selectedPathology,
@@ -69,8 +126,8 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
       if (onGradCamUpdated) {
         onGradCamUpdated(response);
       }
-    } catch (err) {
-      console.error("Failed to recalculate Grad-CAM saliency:", err);
+    } catch {
+      setRecalculationError("Attribution could not be generated for this prediction.");
     } finally {
       setIsRecalculating(false);
     }
@@ -83,7 +140,7 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
         <div className="flex items-center gap-2">
           <Layers className="h-4 w-4 text-primary-600" />
           <h3 className="text-xs font-bold uppercase tracking-wider text-gray-800">
-            Explainable Radiograph Workstation (Grad-CAM Saliency)
+            Image viewer and model attribution
           </h3>
         </div>
 
@@ -110,8 +167,8 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
             </button>
           </div>
 
-          {/* Toggle Heatmap */}
-          <button
+          {/* Attribution controls appear only when an attribution artifact exists. */}
+          {heatmapData && <button
             type="button"
             onClick={() => setShowHeatmap((prev) => !prev)}
             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
@@ -122,10 +179,10 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
           >
             {showHeatmap ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
             <span>Heatmap Overlay</span>
-          </button>
+          </button>}
 
           {/* Toggle Bounding Boxes */}
-          <button
+          {boundingBoxes.length > 0 && <button
             type="button"
             onClick={() => setShowBoundingBoxes((prev) => !prev)}
             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
@@ -136,9 +193,23 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
           >
             <Maximize2 className="h-3.5 w-3.5" />
             <span>Attention ROI</span>
-          </button>
-        </div>
+          </button>}
       </div>
+      </div>
+      {qualityReport && (
+        <div role="status" className="border-t border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-700">
+          <p className="font-semibold">
+            Server image-quality report: {qualityReport.is_valid ? "passed" : "reported issues"}
+            {` · score ${qualityReport.quality_score.toFixed(2)}`}
+          </p>
+          {qualityReport.issues.length > 0 && (
+            <ul className="mt-1 list-inside list-disc">{qualityReport.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+          )}
+          {qualityReport.warnings.length > 0 && (
+            <ul className="mt-1 list-inside list-disc">{qualityReport.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+          )}
+        </div>
+      )}
 
       {/* Main Canvas Area */}
       <div className="relative flex min-h-[420px] max-h-[560px] items-center justify-center overflow-hidden bg-slate-950 p-4 select-none">
@@ -146,12 +217,17 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
           className="relative inline-block transition-transform duration-150"
           style={{ transform: `scale(${zoomLevel})` }}
         >
-          {/* Base Radiograph */}
-          <img
-            src={rawImageUrl}
-            alt="Thoracic Radiograph"
-            className="max-h-[500px] w-auto rounded-lg object-contain"
-          />
+          {rawImageUrl ? (
+            <img
+              src={rawImageUrl}
+              alt={`Uploaded image: ${image?.original_filename ?? "medical image"}`}
+              className="max-h-[500px] w-auto rounded-lg object-contain"
+            />
+          ) : (
+            <p className="px-6 text-sm text-slate-200">
+              {imageLoadError || (image?.id ? "Loading authorized image…" : "No image is selected for this case.")}
+            </p>
+          )}
 
           {/* Grad-CAM Heatmap Layer */}
           {showHeatmap && heatmapData && (
@@ -187,17 +263,22 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
             })}
         </div>
 
-        {/* DenseNet Activation Indicator */}
-        <div className="absolute bottom-3 left-3 rounded-lg bg-black/80 px-2.5 py-1 text-[10px] font-medium text-emerald-400 backdrop-blur border border-emerald-500/30 flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          DenseNet-121 Feature Map: conv5_block16_concat
-        </div>
+        {heatmapData && (
+          <p className="absolute bottom-3 left-3 rounded-lg bg-black/80 px-2.5 py-1 text-[10px] text-amber-100">
+            Model attribution overlay. It is not a verified disease localization.
+          </p>
+        )}
+        {!heatmapData && heatmapLoadError && (
+          <p role="status" className="absolute bottom-3 left-3 rounded-lg bg-black/80 px-2.5 py-1 text-[10px] text-amber-100">
+            {heatmapLoadError}
+          </p>
+        )}
       </div>
 
       {/* Control Footer Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-t border-gray-100 bg-gray-50/50 p-4">
         {/* Opacity Slider */}
-        <div className="flex items-center gap-3 min-w-[240px]">
+        {heatmapData && <div className="flex min-w-[240px] items-center gap-3">
           <Sliders className="h-4 w-4 text-gray-500" />
           <span className="text-xs font-semibold text-gray-700">Heatmap Opacity:</span>
           <input
@@ -210,10 +291,10 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
             className="h-1.5 flex-1 cursor-pointer appearance-none rounded-lg bg-gray-200 accent-primary-600 disabled:opacity-40"
           />
           <span className="w-8 text-right text-xs font-bold text-gray-700">{opacity}%</span>
-        </div>
+        </div>}
 
         {/* Recalculate Saliency for Alternative Pathology */}
-        {predictionId && (
+        {predictionId && availablePathologies.length > 0 && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500">Target Pathology:</span>
             <select
@@ -221,7 +302,7 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
               onChange={(e) => setSelectedPathology(e.target.value)}
               className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-800 focus:border-primary-500 focus:outline-none"
             >
-              {THORACIC_PATHOLOGIES.map((p) => (
+              {availablePathologies.map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
@@ -230,7 +311,7 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
             <button
               type="button"
               onClick={handleRecalculate}
-              disabled={isRecalculating}
+              disabled={isRecalculating || !selectedPathology}
               className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1 text-xs font-bold text-white hover:bg-gray-800 active:scale-95 disabled:opacity-50"
             >
               {isRecalculating ? (
@@ -245,6 +326,11 @@ export const RadiographViewer: React.FC<RadiographViewerProps> = ({
           </div>
         )}
       </div>
+      {recalculationError && (
+        <p role="alert" className="flex items-center gap-1.5 border-t border-rose-100 px-4 py-2 text-xs text-rose-700">
+          <AlertCircle className="h-3.5 w-3.5" />{recalculationError}
+        </p>
+      )}
     </div>
   );
 };

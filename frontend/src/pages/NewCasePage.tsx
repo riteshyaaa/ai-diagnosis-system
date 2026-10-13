@@ -4,10 +4,11 @@
 
 import React, { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { FilePlus, ArrowLeft, Shield, Sparkles, AlertCircle } from "lucide-react";
+import { FilePlus, ArrowLeft, AlertCircle, Info } from "lucide-react";
 import { caseService } from "../services/cases.service";
 import { patientService } from "../services/patients.service";
-import { CaseModality, BiologicalSex } from "../types";
+import { CaseModality } from "../types";
+import { apiErrorMessage } from "../utils/apiError";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 
 export const NewCasePage: React.FC = () => {
@@ -15,8 +16,6 @@ export const NewCasePage: React.FC = () => {
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [patientMrn, setPatientMrn] = useState("");
   const [modality, setModality] = useState<CaseModality>(CaseModality.MULTIMODAL);
-  const [patientAge, setPatientAge] = useState<number>(58);
-  const [patientSex, setPatientSex] = useState<BiologicalSex>(BiologicalSex.MALE);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +30,10 @@ export const NewCasePage: React.FC = () => {
     setError(null);
 
     try {
-      // 1. Create or register de-identified patient record
+      // The backend stores an unsalted SHA-256 digest of this reference.
+      // This prototype must only be used with synthetic identifiers/data.
       const patient = await patientService.createPatient({
-        mrn: patientMrn || `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-        age: patientAge,
-        sex: patientSex,
-        medical_history_summary: clinicalNotes.slice(0, 200) || undefined,
+        mrn: patientMrn.trim(),
       });
 
       // 2. Create the clinical diagnostic case attached to this patient
@@ -48,21 +45,10 @@ export const NewCasePage: React.FC = () => {
       });
 
       navigate(`/cases/${newCase.id}`);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || "Failed to create diagnostic case.");
+    } catch (error: unknown) {
+      setError(apiErrorMessage(error, "Failed to create diagnostic case."));
       setIsSubmitting(false);
     }
-  };
-
-  const handleApplySample = () => {
-    setChiefComplaint("Acute Dyspnea & Progressive Retrosternal Chest Pain");
-    setClinicalNotes(
-      "58-year-old patient presenting with 3-day history of exertional dyspnea, orthopnea, and bilateral lower extremity edema. Suspected cardiomegaly with congestive pulmonary effusion."
-    );
-    setPatientMrn("MRN-984214-CARDIAC");
-    setModality(CaseModality.MULTIMODAL);
-    setPatientAge(58);
-    setPatientSex(BiologicalSex.MALE);
   };
 
   return (
@@ -74,14 +60,6 @@ export const NewCasePage: React.FC = () => {
         >
           <ArrowLeft className="h-4 w-4" /> Back to Worklist
         </Link>
-        <button
-          type="button"
-          onClick={handleApplySample}
-          className="inline-flex items-center gap-1 rounded-lg border border-primary-200 bg-primary-50 px-2.5 py-1 text-xs font-bold text-primary-700 hover:bg-primary-100"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          Load Clinical Template
-        </button>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
@@ -95,7 +73,7 @@ export const NewCasePage: React.FC = () => {
             </h1>
           </div>
           <p className="mt-1 text-xs text-gray-500">
-            Enrolls a clinical diagnostic encounter with automatic HIPAA SHA-256 identifier hashing
+            Create a case using a synthetic patient reference. No clinical inference is run during case creation.
           </p>
         </div>
 
@@ -116,12 +94,12 @@ export const NewCasePage: React.FC = () => {
               required
               value={chiefComplaint}
               onChange={(e) => setChiefComplaint(e.target.value)}
-              placeholder="e.g., Evaluation of Exertional Dyspnea & Cardiomegaly"
+              placeholder="Enter the case title or presenting concern"
               className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3.5 py-2.5 text-sm text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none"
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
                 Evaluation Modality
@@ -137,50 +115,25 @@ export const NewCasePage: React.FC = () => {
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-                Patient Age
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={patientAge}
-                onChange={(e) => setPatientAge(Number(e.target.value))}
-                className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3 py-2 text-xs text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-                Biological Sex
-              </label>
-              <select
-                value={patientSex}
-                onChange={(e) => setPatientSex(e.target.value as BiologicalSex)}
-                className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3 py-2 text-xs text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none"
-              >
-                <option value={BiologicalSex.MALE}>Male</option>
-                <option value={BiologicalSex.FEMALE}>Female</option>
-                <option value={BiologicalSex.OTHER}>Other</option>
-              </select>
-            </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-gray-700">
-              Patient Medical Record Number (MRN)
+            <label htmlFor="patient-reference" className="block text-xs font-bold uppercase tracking-wider text-gray-700">
+              Synthetic patient reference *
             </label>
             <input
+              id="patient-reference"
               type="text"
+              required
               value={patientMrn}
               onChange={(e) => setPatientMrn(e.target.value)}
-              placeholder="e.g., MRN-884920"
+              autoComplete="off"
+              placeholder="Enter a synthetic reference"
               className="mt-1 block w-full rounded-xl border border-gray-300 bg-gray-50/50 px-3.5 py-2.5 text-sm text-gray-900 focus:border-primary-500 focus:bg-white focus:outline-none"
             />
-            <p className="mt-1 text-[11px] text-gray-400 flex items-center gap-1">
-              <Shield className="h-3 w-3 text-emerald-600" />
-              MRN is salted and cryptographically hashed (SHA-256) on ingestion.
+            <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 p-2 text-[11px] text-amber-900">
+              <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+              The server stores an unsalted SHA-256 hash of this value. Hashing alone does not establish de-identification; do not enter real patient identifiers or clinical data.
             </p>
           </div>
 

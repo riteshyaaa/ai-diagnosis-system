@@ -2,7 +2,7 @@
 MedFusion AI — FastAPI Application Factory.
 
 Creates and configures the FastAPI application with:
-- Lifespan events (database connect/disconnect, model preloading)
+- Lifespan events (database schema validation and resource cleanup)
 - CORS middleware
 - Centralized exception handlers for domain exceptions
 - Versioned API routers (/api/v1)
@@ -10,15 +10,18 @@ Creates and configures the FastAPI application with:
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncGenerator
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import api_v1_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, engine
-from app.models import Base
 from app.services.demo_user_service import seed_demo_users
 from app.exceptions import (
     AccountLockedError,
@@ -40,12 +43,28 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan manager.
-    Initializes database pools and tables on startup.
+    Validates the migrated database schema before serving requests.
     Cleans up resources on shutdown.
     """
-    # Startup: Ensure database schema / tables are created
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Application startup verifies the schema but never creates or alters tables.
+    # Apply reviewed Alembic migrations explicitly before starting the service.
+    migration_directory = Path(__file__).resolve().parents[1] / "alembic"
+    expected_revisions = set(ScriptDirectory(str(migration_directory)).get_heads())
+    try:
+        async with engine.connect() as conn:
+            result = await conn.execute(text("SELECT version_num FROM alembic_version"))
+            applied_revisions = set(result.scalars().all())
+    except SQLAlchemyError as exc:
+        raise RuntimeError(
+            "Database migrations are missing or unreadable. From the backend directory, "
+            "run `alembic upgrade head` before starting MedFusion AI."
+        ) from exc
+
+    if applied_revisions != expected_revisions:
+        raise RuntimeError(
+            "Database schema revision does not match this application. From the backend "
+            "directory, run `alembic upgrade head` before starting MedFusion AI."
+        )
     if settings.demo_users_enabled and settings.debug and settings.app_env == "development":
         async with AsyncSessionLocal() as session:
             await seed_demo_users(session)
@@ -61,8 +80,9 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description=(
-            "MedFusion AI — Clinical Decision Support System API. "
-            "Assists healthcare professionals with multimodal AI diagnostic analysis."
+            "MedFusion AI engineering prototype API. Inference remains unavailable until a "
+            "compatible model artifact is verified and promoted. Stored outputs are not "
+            "clinically validated and do not replace clinician judgment."
         ),
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,

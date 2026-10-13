@@ -9,7 +9,6 @@ Exposes routes for:
 - DELETE /clinical-records/{record_id}         Delete clinical record (DRAFT only)
 """
 
-from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,7 +74,7 @@ async def list_case_clinical_records(
 ) -> ClinicalRecordListResponse:
     """List clinical measurement records for a diagnostic case."""
     service = ClinicalRecordService(session)
-    return await service.list_case_records(case_id=case_id)
+    return await service.list_case_records(case_id=case_id, viewer_id=current_user.id)
 
 
 @router.get(

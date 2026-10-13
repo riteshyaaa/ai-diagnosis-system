@@ -6,18 +6,19 @@ relational graph aggregation, and audit logging.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 import uuid
 from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import DuplicateError, NotFoundError, ValidationError
+from app.exceptions import DuplicateError, ValidationError
 from app.models.audit_log import AuditAction, AuditResourceType
 from app.models.diagnostic_case import CaseModality, CaseStatus, DiagnosticCase
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.case_repository import CaseRepository
 from app.repositories.patient_repository import PatientRepository
+from app.security.record_access import require_case_owner, require_patient_owner
 from app.schemas.case import (
     CaseCreate,
     CaseDetailResponse,
@@ -25,6 +26,7 @@ from app.schemas.case import (
     CaseResponse,
     CaseUpdate,
 )
+from app.utils.prediction_mapping import prediction_record_to_response
 
 
 class CaseService:
@@ -71,11 +73,10 @@ class CaseService:
         - Verifies that the referenced patient exists
         - Generates or validates unique case number
         - Initializes case in DRAFT status
-        - Emits compliance audit log
+        - Writes an ordinary audit event
         """
         patient = await self.patient_repo.get_by_id(data.patient_id)
-        if not patient:
-            raise NotFoundError("Patient", data.patient_id)
+        require_patient_owner(patient, data.patient_id, creator_id)
 
         if data.case_number:
             case_number = data.case_number.strip().upper()
@@ -125,8 +126,7 @@ class CaseService:
     ) -> CaseResponse:
         """Retrieve diagnostic case summary by ID."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, viewer_id)
 
         if log_view:
             await self.audit_repo.log_event(
@@ -152,8 +152,7 @@ class CaseService:
         Patient, uploaded Images, Clinical Records, Predictions, XAI Explanations, and Reviews.
         """
         case = await self.case_repo.get_full_case_details(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, viewer_id)
 
         await self.audit_repo.log_event(
             action=AuditAction.CASE_VIEW,
@@ -165,7 +164,20 @@ class CaseService:
             details={"view_type": "full_relational_graph"},
         )
 
-        return CaseDetailResponse.model_validate(case)
+        detail_data = CaseResponse.model_validate(case).model_dump()
+        detail_data.update(
+            {
+                "patient": case.patient,
+                "images": case.images,
+                "clinical_records": case.clinical_records,
+                "predictions": [
+                    prediction_record_to_response(prediction)
+                    for prediction in case.predictions
+                ],
+                "reviews": case.reviews,
+            }
+        )
+        return CaseDetailResponse.model_validate(detail_data)
 
     async def update_case(
         self,
@@ -177,8 +189,7 @@ class CaseService:
     ) -> CaseResponse:
         """Update case details (modality, chief complaint, clinical notes)."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, updater_id)
 
         if case.status in (CaseStatus.ARCHIVED, CaseStatus.REVIEWED):
             raise ValidationError(
@@ -227,8 +238,7 @@ class CaseService:
         - ARCHIVED -> DRAFT
         """
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, updater_id)
 
         current_status = case.status
         if current_status == new_status:
@@ -264,6 +274,7 @@ class CaseService:
 
     async def list_cases(
         self,
+        viewer_id: UUID,
         status: Optional[CaseStatus] = None,
         modality: Optional[CaseModality] = None,
         patient_id: Optional[UUID] = None,
@@ -272,8 +283,10 @@ class CaseService:
         limit: int = 50,
     ) -> CaseListResponse:
         """Query and paginate diagnostic cases with multi-criteria filters."""
-        stmt = select(DiagnosticCase)
-        count_stmt = select(func.count()).select_from(DiagnosticCase)
+        stmt = select(DiagnosticCase).where(DiagnosticCase.created_by_id == viewer_id)
+        count_stmt = select(func.count()).select_from(DiagnosticCase).where(
+            DiagnosticCase.created_by_id == viewer_id
+        )
 
         if status is not None:
             stmt = stmt.where(DiagnosticCase.status == status)
@@ -314,8 +327,7 @@ class CaseService:
         Delete a diagnostic case (allowed only if case is in DRAFT state).
         """
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, user_id)
 
         if case.status != CaseStatus.DRAFT:
             raise ValidationError(

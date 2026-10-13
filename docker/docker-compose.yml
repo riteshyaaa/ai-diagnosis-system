@@ -39,6 +39,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-medfusion_db}
       POSTGRES_USER: ${POSTGRES_USER:-medfusion_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # The .env DATABASE_URL usually targets localhost for host development.
+      # Empty makes Settings build a URL from the container-specific values above.
+      DATABASE_URL: ""
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:

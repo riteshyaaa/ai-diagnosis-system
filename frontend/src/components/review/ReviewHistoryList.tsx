@@ -4,11 +4,11 @@
 
 import React from "react";
 import { UserCheck, MessageSquare, Clock, CheckCircle2 } from "lucide-react";
-import { ClinicalReviewResponse, ReviewDecision } from "../../types";
-import { ReviewDecisionBadge, UserRoleBadge } from "../common/Badge";
+import { ReviewDecision, type CaseReviewSummary } from "../../types";
+import { ReviewDecisionBadge } from "../common/Badge";
 
 interface ReviewHistoryListProps {
-  reviews: ClinicalReviewResponse[];
+  reviews: CaseReviewSummary[];
 }
 
 export const ReviewHistoryList: React.FC<ReviewHistoryListProps> = ({ reviews }) => {
@@ -20,7 +20,7 @@ export const ReviewHistoryList: React.FC<ReviewHistoryListProps> = ({ reviews })
           No Clinical Reviews Recorded Yet
         </p>
         <p className="text-[11px] text-gray-400">
-          Supervising clinicians or radiologists can validate AI predictions to establish concordance audit trails.
+          Clinician review history will appear here when a review is saved.
         </p>
       </div>
     );
@@ -37,26 +37,20 @@ export const ReviewHistoryList: React.FC<ReviewHistoryListProps> = ({ reviews })
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2.5">
             <div className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary-100 text-primary-700 font-bold text-xs">
-                {rev.reviewer?.full_name ? rev.reviewer.full_name[0] : "D"}
+                {rev.reviewer_id.slice(0, 1).toUpperCase()}
               </div>
               <div>
                 <span className="text-xs font-bold text-gray-900">
-                  {rev.reviewer?.full_name || "Licensed Medical Reviewer"}
+                  Reviewer {rev.reviewer_id.slice(0, 8)}
                 </span>
-                {rev.reviewer?.department && (
-                  <span className="ml-1.5 text-[10px] text-gray-400">
-                    &bull; {rev.reviewer.department}
-                  </span>
-                )}
               </div>
-              {rev.reviewer?.role && <UserRoleBadge role={rev.reviewer.role} />}
             </div>
 
             <div className="flex items-center gap-2">
               <ReviewDecisionBadge decision={rev.decision} />
               <span className="flex items-center gap-1 text-[10px] text-gray-400">
                 <Clock className="h-3 w-3" />
-                {new Date(rev.created_at).toLocaleString()}
+                {new Date(rev.reviewed_at).toLocaleString()}
               </span>
             </div>
           </div>
@@ -79,8 +73,8 @@ export const ReviewHistoryList: React.FC<ReviewHistoryListProps> = ({ reviews })
 
             <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
               <span>Review ID: <code className="font-mono">{rev.id.slice(0, 8)}...</code></span>
-              <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
-                <CheckCircle2 className="h-3 w-3" /> Signed &amp; Concordance Tracked
+              <span className="inline-flex items-center gap-1 text-gray-500 font-semibold">
+                <CheckCircle2 className="h-3 w-3" /> Review recorded
               </span>
             </div>
           </div>

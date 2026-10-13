@@ -230,3 +230,41 @@ async def test_image_rbac_enforcement(client: AsyncClient, db_session: AsyncSess
         headers=auditor_headers,
     )
     assert res_forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_image_and_file_access_are_scoped_to_case_owner(client: AsyncClient):
+    """A clinician cannot upload, list, read, or delete images on another user's case."""
+    owner_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.image.owner@hospital.org')}"
+    }
+    other_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.image.other@hospital.org')}"
+    }
+    case_id = await setup_test_case(client, owner_headers, "MRN-IMAGE-OWNER-SCOPE")
+    upload_res = await client.post(
+        f"/api/v1/cases/{case_id}/images",
+        files={"file": ("image.png", make_png_bytes(), "image/png")},
+        headers=owner_headers,
+    )
+    assert upload_res.status_code == 201, upload_res.text
+    image_id = upload_res.json()["image"]["id"]
+
+    assert (
+        await client.post(
+            f"/api/v1/cases/{case_id}/images",
+            files={"file": ("other.png", make_png_bytes(), "image/png")},
+            headers=other_headers,
+        )
+    ).status_code == 404
+    assert (
+        await client.get(f"/api/v1/cases/{case_id}/images", headers=other_headers)
+    ).status_code == 404
+    assert (await client.get(f"/api/v1/images/{image_id}", headers=other_headers)).status_code == 404
+    assert (
+        await client.get(f"/api/v1/images/{image_id}/file", headers=other_headers)
+    ).status_code == 404
+    assert (
+        await client.delete(f"/api/v1/images/{image_id}", headers=other_headers)
+    ).status_code == 404
+    assert (await client.get(f"/api/v1/images/{image_id}", headers=owner_headers)).status_code == 200

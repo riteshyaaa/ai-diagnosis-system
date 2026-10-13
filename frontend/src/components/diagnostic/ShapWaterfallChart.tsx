@@ -1,5 +1,5 @@
 /**
- * MedFusion AI — SHAP Feature Attribution & Waterfall Risk Driver Chart
+ * Displays stored SHAP feature attribution values when available.
  */
 
 import React from "react";
@@ -31,7 +31,7 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
           No SHAP Attributions Available
         </p>
         <p className="text-[11px] text-gray-400">
-          Clinical telemetry features will populate SHAP risk contributions once inference completes.
+          No feature-attribution artifact is stored for this prediction.
         </p>
       </div>
     );
@@ -39,7 +39,7 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
 
   const data = tabularExplanation.all_features.map((item) => ({
     name: item.display_name || item.feature_name.replace(/_/g, " ").toUpperCase(),
-    value: item.feature_value !== undefined ? item.feature_value : "—",
+    value: formatFeatureValue(item.feature_value),
     shap: Number(item.shap_value.toFixed(4)),
     isRiskIncreasing: item.direction === "risk_increasing" || item.shap_value >= 0,
     impactDescription: item.clinical_interpretation,
@@ -55,20 +55,20 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
         <div>
           <h3 className="text-sm font-bold uppercase tracking-wider text-gray-900 flex items-center gap-1.5">
             <Activity className="h-4 w-4 text-primary-600" />
-            SHAP Clinical Feature Attributions
+          Stored SHAP feature attribution
           </h3>
           <p className="text-xs text-gray-500">
-            TreeSHAP / KernelSHAP marginal risk contributions to cardiovascular prediction
+            Attribution relative to this model output. Values are not causal explanations or clinical risk estimates.
           </p>
         </div>
         <div className="flex items-center gap-3 text-[11px] font-semibold">
           <span className="flex items-center gap-1 text-rose-600">
             <span className="h-2.5 w-2.5 rounded bg-rose-500" />
-            Increases Risk (+)
+            Increases model output (+)
           </span>
           <span className="flex items-center gap-1 text-emerald-600">
             <span className="h-2.5 w-2.5 rounded bg-emerald-500" />
-            Protective / Lowers Risk (-)
+            Decreases model output (-)
           </span>
         </div>
       </div>
@@ -76,13 +76,13 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
       {/* Baseline / Output Indicator */}
       <div className="my-3 flex items-center justify-between rounded-xl bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
         <div>
-          <span className="text-gray-400">Expected Base Value: </span>
+          <span className="text-gray-400">Stored baseline value: </span>
           <strong className="text-gray-800">
             {(tabularExplanation.base_value * 100).toFixed(1)}%
           </strong>
         </div>
         <div>
-          <span className="text-gray-400">Predicted Score: </span>
+          <span className="text-gray-400">Stored model output: </span>
           <strong className="text-primary-700 font-bold">
             {(tabularExplanation.predicted_risk * 100).toFixed(1)}%
           </strong>
@@ -117,7 +117,7 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
                     <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-xl text-xs">
                       <p className="font-bold text-gray-900">{item.name}</p>
                       <p className="text-gray-500">
-                        Patient Value: <span className="font-semibold text-gray-800">{item.value}</span>
+                        Input value: <span className="font-semibold text-gray-800">{item.value}</span>
                       </p>
                       <p className={item.isRiskIncreasing ? "text-rose-600 font-bold" : "text-emerald-600 font-bold"}>
                         SHAP Contribution: {item.shap > 0 ? `+${item.shap}` : item.shap}
@@ -149,7 +149,7 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
       {/* Key Risk Drivers Table */}
       <div className="mt-4 border-t border-gray-100 pt-3">
         <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700">
-          Top Influential Factors
+          Largest absolute attribution values
         </h4>
         <div className="mt-2 space-y-1.5">
           {data.slice(0, 3).map((item, idx) => (
@@ -180,3 +180,11 @@ export const ShapWaterfallChart: React.FC<ShapWaterfallChartProps> = ({
     </div>
   );
 };
+
+function formatFeatureValue(value: unknown): string {
+  if (value == null) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value) ?? "—";
+}

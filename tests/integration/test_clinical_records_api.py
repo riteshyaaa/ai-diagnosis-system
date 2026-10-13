@@ -17,7 +17,6 @@ Tests:
 import pytest
 from httpx import AsyncClient
 
-from app.models.diagnostic_case import CaseStatus
 
 
 async def get_clinician_token(client: AsyncClient, email: str = "dr.clin.tester@hospital.org") -> str:
@@ -265,3 +264,63 @@ async def test_delete_clinical_record(client: AsyncClient):
         headers=headers,
     )
     assert get_res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_clinical_records_are_scoped_to_case_owner(client: AsyncClient):
+    """Foreign clinicians cannot read or mutate clinical data linked to a case."""
+    owner_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.clin.owner@hospital.org')}"
+    }
+    other_headers = {
+        "Authorization": f"Bearer {await get_clinician_token(client, 'dr.clin.other@hospital.org')}"
+    }
+    case_id = await setup_test_case(client, owner_headers, "MRN-CLIN-OWNER-SCOPE")
+    payload = {
+        "age": 58,
+        "sex": 1,
+        "chest_pain_type": 2,
+        "resting_bp": 135.0,
+        "cholesterol": 245.0,
+        "fasting_bs": 0,
+        "resting_ecg": 1,
+        "max_hr": 150.0,
+        "exercise_angina": 0,
+        "st_depression": 1.4,
+        "st_slope": 1,
+        "num_major_vessels": 1,
+        "thalassemia": 2,
+    }
+    create_res = await client.post(
+        f"/api/v1/cases/{case_id}/clinical-records",
+        json=payload,
+        headers=owner_headers,
+    )
+    assert create_res.status_code == 201, create_res.text
+    record_id = create_res.json()["record"]["id"]
+
+    assert (
+        await client.post(
+            f"/api/v1/cases/{case_id}/clinical-records",
+            json=payload,
+            headers=other_headers,
+        )
+    ).status_code == 404
+    assert (
+        await client.get(
+            f"/api/v1/cases/{case_id}/clinical-records", headers=other_headers
+        )
+    ).status_code == 404
+    assert (
+        await client.get(f"/api/v1/clinical-records/{record_id}", headers=other_headers)
+    ).status_code == 404
+    assert (
+        await client.patch(
+            f"/api/v1/clinical-records/{record_id}",
+            json={"cholesterol": 215},
+            headers=other_headers,
+        )
+    ).status_code == 404
+    assert (
+        await client.delete(f"/api/v1/clinical-records/{record_id}", headers=other_headers)
+    ).status_code == 404

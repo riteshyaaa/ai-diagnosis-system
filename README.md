@@ -1,6 +1,6 @@
 # MedFusion AI — Clinical Decision Support Prototype
 
-> **Research prototype only.** This repository is not clinically validated and must not be used to diagnose, triage, or guide treatment. No trained model checkpoint is included; inference remains unavailable until a verified model is supplied and promoted. It does not establish HIPAA, GDPR, 21 CFR Part 11, or other regulatory compliance.
+> **Research prototype only.** This repository is not clinically validated and must not be used to diagnose, triage, or guide treatment. No provenance-verified trained model checkpoint is distributed; inference remains unavailable until a compatible artifact is verified and promoted. It does not establish HIPAA, GDPR, 21 CFR Part 11, or other regulatory compliance.
 
 ---
 
@@ -8,7 +8,8 @@
 
 **MedFusion AI** is a software prototype with a React/TypeScript frontend, FastAPI backend, PostgreSQL data model, and experimental ML code for chest-radiograph, tabular, and multimodal workflows. The repository includes:
 
-- API, persistence, and UI code for authentication, patients, cases, uploads, clinical records, predictions, and reviews; these workflows still require runtime verification.
+- API, persistence, and UI code for authentication, owner-scoped patient/case records, uploads, clinical records, predictions, and reviews; backend API tests cover selected workflows, but no browser-driven end-to-end suite exists.
+- An owner-scoped JSON report preview generated from saved case inputs, model output, and reviews. It remains a draft or pending-review preview; PDF generation, signature, and controlled delivery are not implemented.
 - Model architectures, synthetic-data experiments, preprocessing, training, and evaluation code; these are research components, not evidence of model performance.
 - A fail-closed model registry: absent or unverified weights do not produce predictions.
 - A security/audit status overview in [`docs/IMPLEMENTATION_AUDIT.md`](docs/IMPLEMENTATION_AUDIT.md).
@@ -61,31 +62,31 @@ docker compose --env-file .env -f docker/docker-compose.yml up --build -d
 # Health:    http://localhost:8000/health
 ```
 
-### Option 2: Local Development
+### Option 2: Local Development (Windows PowerShell)
 
-```bash
-# Backend (from repository root)
+Use a separate development database. Do not point setup or tests at a database containing records you need to keep.
+
+```powershell
+# Backend: from the repository root
+$env:DATABASE_URL = "sqlite+aiosqlite:///./medfusion-dev.db"
+$env:APP_ENV = "development"
+$env:DEBUG = "true"
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r backend/requirements-dev.txt -r ml/requirements.txt
-# For local demo logins, set APP_ENV=development, DEBUG=true, and
-# DEMO_USERS_ENABLED=true in the repository-root .env file.
-uvicorn app.main:app --app-dir backend --reload --port 8000
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt -r ml/requirements.txt
+.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini upgrade head
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload --port 8000
+```
 
-# Frontend (in another terminal)
-cd frontend
+In a second terminal, from `frontend/`:
+
+```powershell
 npm ci
 npm run dev
 ```
 
-When `DEMO_USERS_ENABLED=true`, the backend seeds the demo personas only when
-`APP_ENV=development` and `DEBUG=true`. The Quick Login buttons use
-`MedFusion#2026Secure!`; demo accounts must not be enabled in production.
-These setup commands have not yet been verified end-to-end. The repository contains
-no deployable weights, so prediction endpoints return service unavailable until a
-verified artifact is registered and explicitly promoted.
+The API is at `http://localhost:8000`; Vite prints its frontend URL (usually `http://localhost:5173`). Keep the same `DATABASE_URL` in the backend shell for migrations and server startup. Demo personas are seeded only when `DEMO_USERS_ENABLED=true`, `APP_ENV=development`, and `DEBUG=true`; this setting must not be used outside local development.
 
----
+The backend refuses to start unless Alembic has upgraded the selected database to the current head. Do not run migrations against an existing local database unless you have a backup and intend to upgrade it. Model inference remains unavailable (HTTP 503) until compatible artifacts and provenance are verified and promoted; ignored local files do not change that status.
 
 ## 📁 Repository Structure
 
@@ -169,8 +170,8 @@ ai_diagnosis/
 ## Security & privacy status
 
 - Password hashing, JWT authentication, and endpoint role dependencies are present; public registration creates clinician accounts only.
-- The application does not consistently enforce ownership or organization boundaries for patient/case records. Do not use real patient data.
-- There is no audit-events API or demonstrated immutable audit store. The UI no longer displays fabricated events or compliance claims.
+- Patient and case access is owner-scoped in the current implementation; there is no organization/team sharing model. Legacy patients without a uniquely evidenced owner stay inaccessible. Do not use real patient data because the system has no clinical validation and other deployment/security controls remain incomplete.
+- The audit page reads a minimal administrator/auditor-only API. Events omit free-form details and network metadata; the database rows are not tamper-evident or a compliance certification.
 - Upload reads are bounded in the API, but request-body limits and other deployment-level protections still need verification.
 - See [`docs/SECURITY.md`](docs/SECURITY.md) for controls and remaining risks. No compliance certification is claimed.
 

@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import { authService } from "../services/auth.service";
 import type { LoginPayload, RegisterPayload, User } from "../types";
+import { apiErrorMessage } from "../utils/apiError";
 
 interface AuthState {
   user: User | null;
@@ -43,11 +44,13 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
         error: null,
       });
-    } catch (err: any) {
-      const errorMsg =
-        err?.response?.data?.detail || "Authentication failed. Please verify credentials.";
+    } catch (error: unknown) {
+      const errorMsg = apiErrorMessage(
+        error,
+        "Authentication failed. Please verify credentials.",
+      );
       set({ isLoading: false, error: errorMsg });
-      throw err;
+      throw error;
     }
   },
 
@@ -70,11 +73,10 @@ export const useAuthStore = create<AuthState>((set) => ({
         isLoading: false,
         error: null,
       });
-    } catch (err: any) {
-      const errorMsg =
-        err?.response?.data?.detail || "Registration failed. Please try again.";
+    } catch (error: unknown) {
+      const errorMsg = apiErrorMessage(error, "Registration failed. Please try again.");
       set({ isLoading: false, error: errorMsg });
-      throw err;
+      throw error;
     }
   },
 

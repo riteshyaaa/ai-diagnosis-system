@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.clinical_review import ClinicalReview, ReviewDecision
 from app.models.diagnostic_case import DiagnosticCase
-from app.models.prediction_record import PredictionRecord
 from app.repositories.base import BaseRepository
 
 
@@ -70,12 +69,14 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
     async def list_by_reviewer(
         self,
         reviewer_id: UUID,
+        owner_id: UUID,
         decision: Optional[ReviewDecision] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> List[ClinicalReview]:
         """Fetch all reviews authored by a specific clinician with optional decision filtering."""
         items, _ = await self.list_reviews(
+            owner_id=owner_id,
             skip=skip,
             limit=limit,
             reviewer_id=reviewer_id,
@@ -85,6 +86,7 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
 
     async def list_reviews(
         self,
+        owner_id: UUID,
         skip: int = 0,
         limit: int = 50,
         case_id: Optional[UUID] = None,
@@ -92,8 +94,16 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
         decision: Optional[ReviewDecision] = None,
     ) -> Tuple[List[ClinicalReview], int]:
         """Fetch paginated reviews with optional filtering by case, reviewer, or decision."""
-        base_query = select(ClinicalReview)
-        count_query = select(func.count(ClinicalReview.id))
+        base_query = (
+            select(ClinicalReview)
+            .join(DiagnosticCase, ClinicalReview.case_id == DiagnosticCase.id)
+            .where(DiagnosticCase.created_by_id == owner_id)
+        )
+        count_query = (
+            select(func.count(ClinicalReview.id))
+            .join(DiagnosticCase, ClinicalReview.case_id == DiagnosticCase.id)
+            .where(DiagnosticCase.created_by_id == owner_id)
+        )
 
         if case_id is not None:
             base_query = base_query.where(ClinicalReview.case_id == case_id)
@@ -125,16 +135,20 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
         items = list(result.scalars().all())
         return items, total
 
-    async def get_statistics(self, reviewer_id: Optional[UUID] = None) -> Dict[str, Any]:
+    async def get_statistics(
+        self, owner_id: UUID, reviewer_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
         """Calculate aggregate decision counts and concordance metrics."""
-        base_filter = []
+        base_filter = [DiagnosticCase.created_by_id == owner_id]
         if reviewer_id is not None:
             base_filter.append(ClinicalReview.reviewer_id == reviewer_id)
 
         # Count total reviews
-        total_stmt = select(func.count(ClinicalReview.id))
-        if base_filter:
-            total_stmt = total_stmt.where(*base_filter)
+        total_stmt = (
+            select(func.count(ClinicalReview.id))
+            .join(DiagnosticCase, ClinicalReview.case_id == DiagnosticCase.id)
+            .where(*base_filter)
+        )
         total_result = await self.session.execute(total_stmt)
         total_reviews = total_result.scalar_one() or 0
 
@@ -153,6 +167,7 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
         # Breakdown by decision
         decision_stmt = (
             select(ClinicalReview.decision, func.count(ClinicalReview.id))
+            .join(DiagnosticCase, ClinicalReview.case_id == DiagnosticCase.id)
         )
         if base_filter:
             decision_stmt = decision_stmt.where(*base_filter)
@@ -171,6 +186,7 @@ class ClinicalReviewRepository(BaseRepository[ClinicalReview]):
         # Top modified diagnoses
         mod_stmt = (
             select(ClinicalReview.modified_diagnosis, func.count(ClinicalReview.id).label("cnt"))
+            .join(DiagnosticCase, ClinicalReview.case_id == DiagnosticCase.id)
             .where(
                 ClinicalReview.decision == ReviewDecision.MODIFY,
                 ClinicalReview.modified_diagnosis.isnot(None),

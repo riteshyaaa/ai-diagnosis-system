@@ -6,11 +6,42 @@ import { create } from "zustand";
 import { caseService } from "../services/cases.service";
 import { explanationService } from "../services/explanations.service";
 import { predictionService } from "../services/predictions.service";
+import { apiErrorMessage } from "../utils/apiError";
 import type {
   DiagnosticCaseDetail,
   ExplanationResponse,
   PredictionResponse,
 } from "../types";
+
+function latestByCreatedAt<T extends { created_at: string }>(items: T[]): T | null {
+  return items.reduce<T | null>((latest, item) => {
+    if (!latest || Date.parse(item.created_at) > Date.parse(latest.created_at)) {
+      return item;
+    }
+    return latest;
+  }, null);
+}
+
+export function predictionMatchesCurrentInputs(
+  caseDetail: DiagnosticCaseDetail,
+  prediction: PredictionResponse,
+): boolean {
+  const image = latestByCreatedAt(caseDetail.images);
+  const clinicalRecord = latestByCreatedAt(caseDetail.clinical_records);
+  const predictionClinicalUpdatedAt = prediction.clinical_record_updated_at
+    ? Date.parse(prediction.clinical_record_updated_at)
+    : null;
+  const currentClinicalUpdatedAt = clinicalRecord
+    ? Date.parse(clinicalRecord.updated_at)
+    : null;
+
+  return (
+    (prediction.image_record_id ?? null) === (image?.id ?? null) &&
+    (prediction.image_file_hash ?? null) === (image?.file_hash ?? null) &&
+    (prediction.clinical_record_id ?? null) === (clinicalRecord?.id ?? null) &&
+    predictionClinicalUpdatedAt === currentClinicalUpdatedAt
+  );
+}
 
 interface CaseState {
   selectedCase: DiagnosticCaseDetail | null;
@@ -27,7 +58,7 @@ interface CaseState {
   loadCase: (caseId: string) => Promise<DiagnosticCaseDetail>;
   refreshCase: (caseId: string) => Promise<void>;
   loadExplanationForPrediction: (predictionId: string) => Promise<void>;
-  runPrediction: (caseId: string, modelType?: string) => Promise<PredictionResponse>;
+  runPrediction: (caseId: string) => Promise<PredictionResponse>;
   clearError: () => void;
 }
 
@@ -40,18 +71,20 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   error: null,
 
   setSelectedCase: (caseDetail) => {
-    set({ selectedCase: caseDetail });
-    if (caseDetail && caseDetail.predictions && caseDetail.predictions.length > 0 && caseDetail.predictions[0]) {
-      const latestPred = caseDetail.predictions[0];
+    set({
+      selectedCase: caseDetail,
+      activePrediction: null,
+      activeExplanation: null,
+    });
+    const latestPred = caseDetail?.predictions[0];
+    if (caseDetail && latestPred && predictionMatchesCurrentInputs(caseDetail, latestPred)) {
       set({ activePrediction: latestPred });
       get().loadExplanationForPrediction(latestPred.id);
-    } else {
-      set({ activePrediction: null, activeExplanation: null });
     }
   },
 
   setActivePrediction: (prediction) => {
-    set({ activePrediction: prediction });
+    set({ activePrediction: prediction, activeExplanation: null });
     if (prediction) {
       get().loadExplanationForPrediction(prediction.id);
     } else {
@@ -62,24 +95,34 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   setActiveExplanation: (explanation) => set({ activeExplanation: explanation }),
 
   loadCase: async (caseId: string) => {
-    set({ isLoading: true, error: null });
+    const currentCase = get().selectedCase;
+    set({
+      isLoading: true,
+      error: null,
+      ...(currentCase?.id !== caseId
+        ? { selectedCase: null, activePrediction: null, activeExplanation: null }
+        : {}),
+    });
     try {
       const data = await caseService.getCaseById(caseId);
-      set({ selectedCase: data, isLoading: false });
+      set({
+        selectedCase: data,
+        activePrediction: null,
+        activeExplanation: null,
+        isLoading: false,
+      });
 
-      if (data.predictions && data.predictions.length > 0 && data.predictions[0]) {
-        const latestPred = data.predictions[0];
+      const latestPred = data.predictions[0];
+      if (latestPred && predictionMatchesCurrentInputs(data, latestPred)) {
         set({ activePrediction: latestPred });
         get().loadExplanationForPrediction(latestPred.id);
-      } else {
-        set({ activePrediction: null, activeExplanation: null });
       }
 
       return data;
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || "Failed to load diagnostic case details.";
+    } catch (error: unknown) {
+      const msg = apiErrorMessage(error, "Failed to load diagnostic case details.");
       set({ isLoading: false, error: msg });
-      throw err;
+      throw error;
     }
   },
 
@@ -87,47 +130,54 @@ export const useCaseStore = create<CaseState>((set, get) => ({
     try {
       const data = await caseService.getCaseById(caseId);
       set({ selectedCase: data });
-      if (data.predictions && data.predictions.length > 0 && data.predictions[0]) {
+      if (data.predictions.length > 0 && data.predictions[0]) {
         const currentActiveId = get().activePrediction?.id;
         const matchingPred =
           (currentActiveId ? data.predictions.find((p) => p.id === currentActiveId) : undefined) ||
           data.predictions[0];
-        if (matchingPred) {
+        if (matchingPred && predictionMatchesCurrentInputs(data, matchingPred)) {
           set({ activePrediction: matchingPred });
           get().loadExplanationForPrediction(matchingPred.id);
+        } else {
+          set({ activePrediction: null, activeExplanation: null });
         }
+      } else {
+        set({ activePrediction: null, activeExplanation: null });
       }
-    } catch (err: any) {
-      console.error("Failed to refresh case:", err);
+    } catch (error: unknown) {
+      set({ error: apiErrorMessage(error, "Failed to refresh diagnostic case details.") });
     }
   },
 
   loadExplanationForPrediction: async (predictionId: string) => {
     try {
       const explanation = await explanationService.getExplanationByPredictionId(predictionId);
-      set({ activeExplanation: explanation });
-    } catch (err) {
+      if (get().activePrediction?.id === predictionId) {
+        set({ activeExplanation: explanation });
+      }
+    } catch {
       // Explanation might still be generating or unimodal
-      set({ activeExplanation: null });
+      if (get().activePrediction?.id === predictionId) {
+        set({ activeExplanation: null });
+      }
     }
   },
 
-  runPrediction: async (caseId: string, modelType?: string) => {
+  runPrediction: async (caseId: string) => {
     set({ isPredicting: true, error: null });
     try {
       const pred = await predictionService.predictCase(caseId, {
         generate_explainability: true,
-        model_version: modelType,
       });
       set({ activePrediction: pred, isPredicting: false });
       if (pred) {
         get().loadExplanationForPrediction(pred.id);
       }
       return pred;
-    } catch (err: any) {
-      const msg = err?.response?.data?.detail || "AI inference execution failed.";
+    } catch (error: unknown) {
+      const msg = apiErrorMessage(error, "AI inference execution failed.");
       set({ isPredicting: false, error: msg });
-      throw err;
+      throw error;
     }
   },
 

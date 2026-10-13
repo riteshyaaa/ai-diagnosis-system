@@ -7,17 +7,17 @@ Encapsulates database operations for AI inference outputs:
 - Safety status and confidence band filtering
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from uuid import UUID
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.prediction_record import (
     PredictionRecord,
-    ConfidenceBand,
     PredictionStatus,
 )
+from app.models.diagnostic_case import DiagnosticCase
 from app.repositories.base import BaseRepository
 
 
@@ -76,3 +76,36 @@ class PredictionRepository(BaseRepository[PredictionRecord]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_by_case_owner(
+        self,
+        owner_id: UUID,
+        status: Optional[PredictionStatus] = None,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> Tuple[List[PredictionRecord], int]:
+        """List predictions only for cases owned by the requesting user."""
+        query = (
+            select(PredictionRecord)
+            .join(DiagnosticCase, PredictionRecord.case_id == DiagnosticCase.id)
+            .where(DiagnosticCase.created_by_id == owner_id)
+        )
+        count_query = (
+            select(func.count(PredictionRecord.id))
+            .join(DiagnosticCase, PredictionRecord.case_id == DiagnosticCase.id)
+            .where(DiagnosticCase.created_by_id == owner_id)
+        )
+        if status is not None:
+            query = query.where(PredictionRecord.status == status)
+            count_query = count_query.where(PredictionRecord.status == status)
+
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one()
+        query = (
+            query.options(selectinload(PredictionRecord.explanation))
+            .order_by(PredictionRecord.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all()), total

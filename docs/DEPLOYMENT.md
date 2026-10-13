@@ -21,6 +21,8 @@ cp .env.example .env
 
 Replace `POSTGRES_PASSWORD` and `SECRET_KEY` in `.env`; do not use the example placeholders for a shared deployment. Validate and start:
 
+For production mode, also set `APP_ENV=production`, `DEBUG=false`, an explicit HTTPS `CORS_ORIGINS` list, a non-default `POSTGRES_USER` of at least 8 characters, a database password of at least 16 characters, and a non-placeholder `SECRET_KEY` of at least 32 characters. Production startup validates these settings, but this does not replace secret management, TLS, network controls, or an operational security review. The Compose backend intentionally clears `DATABASE_URL` so it builds a URL from `POSTGRES_*` values and reaches the database at the Compose hostname `db`; host development can continue using the example's `localhost` URL.
+
 ```bash
 docker compose --env-file .env -f docker/docker-compose.yml config
 docker compose --env-file .env -f docker/docker-compose.yml up --build -d
@@ -57,13 +59,13 @@ The frontend's development API base URL is configured in `.env.example`. Demo ac
 
 ## Database and files
 
-The Compose file defines PostgreSQL and persistent volumes for database, uploaded files, and logs. The application startup path currently calls SQLAlchemy `create_all()` rather than applying Alembic migrations. Do not use that behavior as a migration/rollback plan for an existing production database. Define tested backups, restoration, migrations, retention, and filesystem permissions before deployment.
+The Compose file defines PostgreSQL and persistent volumes for database, uploaded files, and logs. The backend container applies Alembic migrations before starting, and application startup checks that the database is at the current Alembic head. The migrations are additive in this implementation pass, but PostgreSQL execution has not been exercised in this environment. Review migrations and take a restorable backup before upgrading any database with records you need to keep. Define tested recovery, retention, and filesystem-permission procedures before deployment.
 
 ## Production readiness checklist
 
 Production operation is **blocked** until, at minimum:
 
-1. Production settings reject default/debug secrets and unsafe configuration at startup.
+1. Production settings reject debug mode, demo users, short or placeholder signing keys, local/non-PostgreSQL database URLs, weak/default database credentials, and non-HTTPS CORS origins. This validation has unit coverage; PostgreSQL startup has not been verified here.
 2. Database/backend ports are private; HTTPS, reverse-proxy body/time/concurrency limits, and monitoring are configured.
 3. Record-level and institution-level access control is specified and verified.
 4. Database migrations, backups/recovery, upload retention, audit design, and operational runbooks are implemented and tested.

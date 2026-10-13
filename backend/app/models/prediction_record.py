@@ -1,18 +1,24 @@
 """
 MedFusion AI — AI Prediction Record ORM Model.
 
-Stores multi-condition predictions, raw & calibrated probabilities,
-confidence scoring, uncertainty bands, and abstention reasons.
+Stores prediction records and model-output fields. Calibration, confidence, uncertainty,
+and abstention semantics depend on separately verified artifacts and evaluation.
 """
 
 import enum
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import uuid
-from sqlalchemy import Enum, Float, ForeignKey, JSON, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, JSON, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.clinical_review import ClinicalReview
+    from app.models.diagnostic_case import DiagnosticCase
+    from app.models.explanation_record import ExplanationRecord
 
 
 class ModelType(str, enum.Enum):
@@ -52,6 +58,28 @@ class PredictionRecord(Base, UUIDMixin, TimestampMixin):
         ForeignKey("diagnostic_cases.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    image_record_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("image_records.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    clinical_record_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clinical_records.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    image_file_hash: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="SHA-256 hash of the image bytes used by this inference run",
+    )
+    clinical_record_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Clinical record version timestamp used by this inference run",
     )
     model_type: Mapped[ModelType] = mapped_column(
         Enum(ModelType, name="model_type", create_type=True),

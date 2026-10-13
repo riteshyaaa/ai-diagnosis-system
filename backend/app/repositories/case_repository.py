@@ -13,7 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.diagnostic_case import DiagnosticCase, CaseModality, CaseStatus
+from app.models.diagnostic_case import DiagnosticCase, CaseStatus
+from app.models.clinical_review import ClinicalReview
 from app.models.prediction_record import PredictionRecord
 from app.repositories.base import BaseRepository
 
@@ -45,7 +46,7 @@ class CaseRepository(BaseRepository[DiagnosticCase]):
                 selectinload(DiagnosticCase.clinical_records),
                 selectinload(DiagnosticCase.predictions).selectinload(PredictionRecord.explanation),
                 selectinload(DiagnosticCase.predictions).selectinload(PredictionRecord.reviews),
-                selectinload(DiagnosticCase.reviews),
+                selectinload(DiagnosticCase.reviews).selectinload(ClinicalReview.reviewer),
             )
         )
         result = await self.session.execute(stmt)

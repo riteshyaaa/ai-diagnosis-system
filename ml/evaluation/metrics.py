@@ -81,7 +81,7 @@ class MultiLabelMetrics:
 class EvaluationReport:
     """
     Comprehensive, auditable model validation report.
-    Serializes to JSON for regulatory and clinical compliance tracking.
+    Serializes experimental evaluation metrics to JSON; this is not regulatory evidence.
     """
 
     model_name: str

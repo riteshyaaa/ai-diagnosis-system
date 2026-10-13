@@ -39,9 +39,9 @@ router = APIRouter(tags=["Clinical Review & Human-in-the-Loop"])
     status_code=status.HTTP_201_CREATED,
     summary="Submit Clinical Review",
     description=(
-        "Submit a human-in-the-loop physician review decision (Accept, Modify, Reject) "
-        "for an AI prediction on a diagnostic case. Enforces mandatory clinical notes rationale, "
-        "updates the case workflow status to REVIEWED, and records an immutable audit trail."
+        "Submit an Accept, Modify, or Reject review record for a case. The review stores the "
+        "submitted rationale and actor, but does not verify credentials, establish clinical "
+        "correctness, or provide an immutable audit trail."
     ),
 )
 async def submit_case_review(

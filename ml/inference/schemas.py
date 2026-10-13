@@ -1,12 +1,10 @@
-"""
-MedFusion AI — ML Inference Schemas & Data Contracts.
+"""Data contracts for experimental model-inference inputs and outputs.
 
-Defines Pydantic models and Enums for unified multimodal AI inference requests,
-diagnostic findings, risk tiering, uncertainty estimation, and explainability artifacts.
+This module describes software shapes, not clinical validity or deployment readiness.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,7 +71,7 @@ class ModalityGatingWeights(BaseModel):
 
 
 class UncertaintyEstimation(BaseModel):
-    """Comprehensive uncertainty assessment and clinical safety abstention metrics."""
+    """Experimental model-output fields; thresholds are not clinically validated."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -86,7 +84,7 @@ class UncertaintyEstimation(BaseModel):
 
 
 class ExplainabilitySummary(BaseModel):
-    """XAI artifacts including Grad-CAM visual heatmaps and SHAP feature attributions."""
+    """Optional image/tabular attribution artifacts, if actually generated."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -126,7 +124,7 @@ class InferenceResponse(BaseModel):
     explainability: Optional[ExplainabilitySummary] = None
     model_metadata: Dict[str, Any] = Field(default_factory=dict)
     clinical_disclaimer: str = (
-        "MedFusion AI is an assistive Clinical Decision Support System (CDSS) for licensed "
-        "healthcare professionals. It does not provide autonomous medical diagnosis. "
-        "All predictions require human-in-the-loop clinical review and validation."
+        "Engineering prototype without demonstrated clinical validation. Do not use outputs "
+        "to guide diagnosis, triage, or treatment; model outputs are unavailable until a "
+        "compatible artifact is verified and promoted."
     )

@@ -1,17 +1,7 @@
-"""
-MedFusion AI — AI Inference & Case Prediction Orchestration Service.
+"""Prototype inference orchestration for supported diagnostic-case inputs.
 
-Coordinates:
-- Case-triggered multimodal/unimodal AI inference execution
-- Standalone real-time direct inference
-- Relational mapping across DiagnosticCase, ImageRecord, and ClinicalRecord
-- Integration with UnifiedInferenceService and ML Model Registry
-- Persistence of PredictionRecord and ExplanationRecord (Grad-CAM & SHAP)
-- Case lifecycle state transitions (PROCESSING -> COMPLETED)
-- Cryptographic patient privacy protection (SHA-256 MRN hashing)
-- Clinical uncertainty quantification & safety abstention enforcement
-- HIPAA/GDPR immutable audit logging (INFERENCE_RUN, EXPLANATION_GENERATE)
-- Non-autonomous CDSS regulatory compliance disclaimers
+The service persists model outputs and only the explanation artifacts actually returned.
+It does not establish clinical validity, calibrated probabilities, or safety abstention.
 """
 
 import base64
@@ -27,8 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.exceptions import ModelNotFoundError, NotFoundError, ValidationError
 from app.models.audit_log import AuditAction, AuditResourceType
-from app.models.diagnostic_case import CaseModality, CaseStatus, DiagnosticCase
+from app.models.clinical_record import ClinicalRecord
+from app.models.diagnostic_case import CaseModality, CaseStatus
 from app.models.explanation_record import ExplanationRecord, ExplanationType
+from app.models.image_record import ImageRecord
 from app.models.prediction_record import (
     ConfidenceBand,
     ModelType,
@@ -41,6 +33,7 @@ from app.repositories.clinical_record_repository import ClinicalRecordRepository
 from app.repositories.explanation_repository import ExplanationRepository
 from app.repositories.image_repository import ImageRepository
 from app.repositories.prediction_repository import PredictionRepository
+from app.security.record_access import require_case_owner
 from app.schemas.prediction import (
     CasePredictRequest,
     DirectPredictRequest,
@@ -53,6 +46,7 @@ from app.schemas.prediction import (
     UncertaintyDetail,
 )
 from app.services.image_record_service import ImageRecordService
+from app.utils.prediction_mapping import prediction_record_to_response
 from ml.inference.schemas import (
     InferenceModality,
     InferenceRequest,
@@ -77,10 +71,7 @@ def get_inference_engine(device: Optional[str] = None) -> UnifiedInferenceServic
 
 
 class AIInferenceService:
-    """
-    Production service orchestrating clinical AI inference, XAI artifact generation,
-    and relational persistence for diagnostic cases.
-    """
+    """Prototype inference orchestration and persistence for diagnostic cases."""
 
     def __init__(
         self,
@@ -107,52 +98,71 @@ class AIInferenceService:
         user_agent: Optional[str] = None,
     ) -> PredictionResponse:
         """
-        Execute AI diagnostic prediction on an active case.
+        Request inference for explicitly supported inputs.
 
-        - Resolves multimodal inputs (image radiograph and/or tabular measurements)
-        - Executes unified multimodal inference pipeline with calibrated probabilities
-        - Generates Grad-CAM visual heatmaps and SHAP feature attributions
-        - Persists PredictionRecord and ExplanationRecord entities
-        - Advances case workflow state to COMPLETED
-        - Emits compliance audit log
+        - Selects the requested image and/or clinical record
+        - Requests the active model for those inputs
+        - Persists returned outputs and optional artifacts with exact input references
+        - Leaves the case unchanged when model loading or inference fails
+        - Writes an ordinary audit event, not a compliance certification
         """
         # 1. Fetch case with full deep relations
         case = await self.case_repo.get_full_case_details(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, user_id)
 
         # 2. Resolve Radiograph Image Input
         image_path: Optional[Path] = None
+        image_record: Optional[ImageRecord] = None
         selected_image_id: Optional[UUID] = request_data.selected_image_id
+        if selected_image_id and case.modality == CaseModality.TABULAR_ONLY:
+            raise ValidationError(
+                "A tabular-only case cannot select an image input. Change the case modality first."
+            )
 
         if selected_image_id:
             image_record = await self.image_repo.get_by_id(selected_image_id)
             if not image_record or image_record.case_id != case_id:
                 raise NotFoundError("ImageRecord", selected_image_id)
-            image_path = await self.image_record_service.get_image_file_path(image_record.id, variant="processed")
-        elif case.images:
+            image_path = await self.image_record_service.get_image_file_path(
+                image_record.id, variant="processed", viewer_id=user_id
+            )
+        elif case.images and case.modality != CaseModality.TABULAR_ONLY:
             # Use most recently uploaded image for the case
-            latest_image = case.images[-1]
-            image_path = await self.image_record_service.get_image_file_path(latest_image.id, variant="processed")
-
+            latest_image = max(case.images, key=lambda image: image.created_at)
+            image_record = latest_image
+            image_path = await self.image_record_service.get_image_file_path(
+                latest_image.id, variant="processed", viewer_id=user_id
+            )
         # 4. Resolve Structured Clinical EHR Input
         tabular_features: Optional[Dict[str, Any]] = None
+        clinical_record: Optional[ClinicalRecord] = None
         selected_clinical_id: Optional[UUID] = request_data.selected_clinical_record_id
+        if selected_clinical_id and case.modality == CaseModality.IMAGE_ONLY:
+            raise ValidationError(
+                "An image-only case cannot select a clinical-record input. Change the case modality first."
+            )
 
         if selected_clinical_id:
             clinical_record = await self.clinical_repo.get_by_id(selected_clinical_id)
             if not clinical_record or clinical_record.case_id != case_id:
                 raise NotFoundError("ClinicalRecord", selected_clinical_id)
             tabular_features = self._extract_tabular_dict(clinical_record)
-        elif case.clinical_records:
-            latest_clinical = case.clinical_records[-1]
-            tabular_features = self._extract_tabular_dict(latest_clinical)
-
+        elif case.clinical_records and case.modality != CaseModality.IMAGE_ONLY:
+            clinical_record = max(
+                case.clinical_records, key=lambda record: record.updated_at
+            )
+            tabular_features = self._extract_tabular_dict(clinical_record)
         # 5. Modality Validation
-        if not image_path and not tabular_features:
+        if case.modality == CaseModality.IMAGE_ONLY and not image_path:
+            raise ValidationError("An image-only case requires a supported image input.")
+        if case.modality == CaseModality.TABULAR_ONLY and not tabular_features:
+            raise ValidationError("A tabular-only case requires a clinical-record input.")
+        if case.modality == CaseModality.MULTIMODAL and not image_path and not tabular_features:
+            raise ValidationError("Case has no associated medical images or clinical records.")
+        if case.modality == CaseModality.MULTIMODAL and (not image_path or not tabular_features):
             raise ValidationError(
-                "Diagnostic case has no associated medical images or clinical records. "
-                "Provide at least one input modality before running AI inference."
+                "A multimodal case requires both an image and a clinical-record input. "
+                "Use an image-only or tabular-only case for a single-modality workflow."
             )
 
         # 6. Build ML Inference Request
@@ -204,12 +214,23 @@ class AIInferenceService:
             "uncertainty": ml_response.uncertainty.model_dump(),
             "model_metadata": ml_response.model_metadata,
             "patient_mrn_hash": ml_response.patient_mrn_hash,
+            "shap_base_value": (
+                ml_response.explainability.shap_base_value
+                if ml_response.explainability
+                else None
+            ),
         }
 
         # 11. Persist PredictionRecord
         model_version = request_data.model_version or ml_response.model_metadata.get("version", "1.0.0")
         prediction_entity = PredictionRecord(
             case_id=case.id,
+            image_record_id=image_record.id if image_record else None,
+            clinical_record_id=clinical_record.id if clinical_record else None,
+            image_file_hash=image_record.file_hash if image_record else None,
+            clinical_record_updated_at=(
+                clinical_record.updated_at if clinical_record else None
+            ),
             model_type=model_type,
             model_version=model_version,
             primary_condition=primary_condition,
@@ -227,11 +248,22 @@ class AIInferenceService:
         # 12. Persist Explainability Artifacts (Grad-CAM & SHAP)
         explanation_entity = None
         explainability_detail = None
-        if ml_response.explainability:
-            explanation_type = self._resolve_explanation_type(ml_response.modality)
+        if ml_response.explainability and (
+            ml_response.explainability.gradcam_heatmap_base64
+            or ml_response.explainability.gradcam_overlay_base64
+            or ml_response.explainability.shap_feature_contributions
+        ):
+            has_visual_artifact = bool(
+                ml_response.explainability.gradcam_heatmap_base64
+                or ml_response.explainability.gradcam_overlay_base64
+            )
+            has_tabular_artifact = bool(ml_response.explainability.shap_feature_contributions)
+            explanation_type = self._resolve_explanation_type(
+                has_visual_artifact,
+                has_tabular_artifact,
+            )
             heatmap_path = await self._save_heatmap_file(saved_prediction.id, ml_response.explainability.gradcam_overlay_base64)
             shap_values, top_features = self._format_shap_artifacts(ml_response.explainability.shap_feature_contributions)
-            summary_text = self._generate_clinical_summary(ml_response, primary_condition, cal_prob)
 
             explanation_entity = ExplanationRecord(
                 prediction_id=saved_prediction.id,
@@ -239,7 +271,7 @@ class AIInferenceService:
                 heatmap_path=heatmap_path,
                 shap_values=shap_values,
                 top_features=top_features,
-                summary_text=summary_text,
+                summary_text=None,
             )
             saved_explanation = await self.explanation_repo.create(explanation_entity)
             saved_prediction.explanation = saved_explanation
@@ -248,11 +280,11 @@ class AIInferenceService:
                 id=saved_explanation.id,
                 explanation_type=explanation_type.value,
                 heatmap_path=heatmap_path,
-                heatmap_base64=ml_response.explainability.gradcam_heatmap_base64,
-                overlay_base64=ml_response.explainability.gradcam_overlay_base64,
+                heatmap_base64=ml_response.explainability.gradcam_heatmap_base64 or None,
+                overlay_base64=ml_response.explainability.gradcam_overlay_base64 or None,
                 shap_values=shap_values,
                 top_features=top_features,
-                summary_text=summary_text,
+                summary_text=None,
             )
 
         # 13. Advance Case Status to COMPLETED
@@ -334,24 +366,40 @@ class AIInferenceService:
             "uncertainty": ml_response.uncertainty.model_dump(),
             "model_metadata": ml_response.model_metadata,
             "patient_mrn_hash": ml_response.patient_mrn_hash,
+            "shap_base_value": (
+                ml_response.explainability.shap_base_value
+                if ml_response.explainability
+                else None
+            ),
         }
 
         # Format Explainability if available
         explainability_detail = None
-        if ml_response.explainability:
-            explanation_type = self._resolve_explanation_type(ml_response.modality)
+        if ml_response.explainability and (
+            ml_response.explainability.gradcam_heatmap_base64
+            or ml_response.explainability.gradcam_overlay_base64
+            or ml_response.explainability.shap_feature_contributions
+        ):
+            has_visual_artifact = bool(
+                ml_response.explainability.gradcam_heatmap_base64
+                or ml_response.explainability.gradcam_overlay_base64
+            )
+            has_tabular_artifact = bool(ml_response.explainability.shap_feature_contributions)
+            explanation_type = self._resolve_explanation_type(
+                has_visual_artifact,
+                has_tabular_artifact,
+            )
             shap_values, top_features = self._format_shap_artifacts(ml_response.explainability.shap_feature_contributions)
-            summary_text = self._generate_clinical_summary(ml_response, primary_condition, cal_prob)
 
             explainability_detail = ExplainabilityDetail(
                 id=uuid.uuid4(),
                 explanation_type=explanation_type.value,
                 heatmap_path=None,
-                heatmap_base64=ml_response.explainability.gradcam_heatmap_base64,
-                overlay_base64=ml_response.explainability.gradcam_overlay_base64,
+                heatmap_base64=ml_response.explainability.gradcam_heatmap_base64 or None,
+                overlay_base64=ml_response.explainability.gradcam_overlay_base64 or None,
                 shap_values=shap_values,
                 top_features=top_features,
-                summary_text=summary_text,
+                summary_text=None,
             )
 
         # Audit direct inference
@@ -406,6 +454,11 @@ class AIInferenceService:
         prediction = await self.prediction_repo.get_with_explanation(prediction_id)
         if not prediction:
             raise NotFoundError("PredictionRecord", prediction_id)
+        require_case_owner(
+            await self.case_repo.get_by_id(prediction.case_id),
+            prediction.case_id,
+            viewer_id,
+        )
 
         return self._to_prediction_response(prediction)
 
@@ -418,8 +471,7 @@ class AIInferenceService:
     ) -> PredictionListResponse:
         """Fetch all predictions for a diagnostic case."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, viewer_id)
 
         predictions = await self.prediction_repo.get_by_case_id(case_id)
         items = [self._to_prediction_response(p) for p in predictions]
@@ -434,8 +486,7 @@ class AIInferenceService:
     ) -> PredictionResponse:
         """Fetch the most recent prediction for a diagnostic case."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, viewer_id)
 
         prediction = await self.prediction_repo.get_latest_by_case_id(case_id)
         if not prediction:
@@ -445,18 +496,21 @@ class AIInferenceService:
 
     async def list_predictions(
         self,
+        viewer_id: UUID,
         status: Optional[PredictionStatus] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> PredictionListResponse:
         """List predictions with optional status filtering and pagination."""
-        if status is not None:
-            records = await self.prediction_repo.list_by_status(status=status, skip=skip, limit=limit)
-        else:
-            records = await self.prediction_repo.list_all(skip=skip, limit=limit)
+        records, total = await self.prediction_repo.list_by_case_owner(
+            owner_id=viewer_id,
+            status=status,
+            skip=skip,
+            limit=limit,
+        )
 
         items = [self._to_prediction_response(p) for p in records]
-        return PredictionListResponse(total=len(items), items=items)
+        return PredictionListResponse(total=total, items=items)
 
     # --- Internal Helpers ---
 
@@ -466,7 +520,9 @@ class AIInferenceService:
             return self.inference_engine.predict(request)
         except RuntimeError as exc:
             if "model not loaded in registry" in str(exc).lower():
-                raise ModelNotFoundError(str(exc)) from exc
+                # Keep the public error stable and avoid returning internal model
+                # registry details to API clients.
+                raise ModelNotFoundError() from exc
             raise
 
     @staticmethod
@@ -505,20 +561,22 @@ class AIInferenceService:
             return ModelType.TABULAR_MLP
 
     @staticmethod
-    def _resolve_explanation_type(modality: InferenceModality) -> ExplanationType:
-        """Map inference modality to database ExplanationType enum."""
-        if modality == InferenceModality.MULTIMODAL:
+    def _resolve_explanation_type(
+        has_visual_artifact: bool,
+        has_tabular_artifact: bool,
+    ) -> ExplanationType:
+        """Describe only attribution artifacts actually generated for this prediction."""
+        if has_visual_artifact and has_tabular_artifact:
             return ExplanationType.MULTIMODAL_ATTRIBUTION
-        elif modality == InferenceModality.IMAGE_ONLY:
+        if has_visual_artifact:
             return ExplanationType.GRADCAM_SALIENCY
-        else:
-            return ExplanationType.SHAP_FEATURE_IMPORTANCE
+        return ExplanationType.SHAP_FEATURE_IMPORTANCE
 
     @staticmethod
     def _resolve_primary_condition_and_probs(
         ml_response: MLInferenceResponse,
     ) -> tuple[str, float, float]:
-        """Determine primary condition name, raw probability, and calibrated probability."""
+        """Map the primary condition and stored probability fields."""
         if ml_response.pathology_findings:
             top_pathology = max(ml_response.pathology_findings, key=lambda p: p.probability)
             if top_pathology.probability >= 0.5:
@@ -575,121 +633,10 @@ class AIInferenceService:
         shap_dict = {item["feature"]: float(item["attribution"]) for item in shap_contribs}
         return shap_dict, shap_contribs
 
-    @staticmethod
-    def _generate_clinical_summary(
-        ml_response: MLInferenceResponse,
-        primary_condition: str,
-        calibrated_probability: float,
-    ) -> str:
-        """Formulate a concise, structured human-in-the-loop clinical interpretation summary."""
-        parts = []
-        if ml_response.modality == InferenceModality.MULTIMODAL:
-            gating = ml_response.modality_gating
-            img_w = gating.image_weight if gating else 0.5
-            tab_w = gating.tabular_weight if gating else 0.5
-            parts.append(
-                f"MultimodalLateFusion evaluated: Visual Gating Weight = {img_w:.1%}, "
-                f"Tabular Gating Weight = {tab_w:.1%}."
-            )
-            if ml_response.pathology_findings:
-                pos_paths = [f"{f.pathology} ({f.probability:.1%})" for f in ml_response.pathology_findings if f.positive]
-                if pos_paths:
-                    parts.append(f"Detected radiograph findings: {', '.join(pos_paths)}.")
-                else:
-                    parts.append("No thoracic pathology findings exceeded the decision threshold.")
-            if ml_response.clinical_risk:
-                parts.append(
-                    f"Cardiovascular risk assessed at {ml_response.clinical_risk.calibrated_probability:.1%} "
-                    f"({ml_response.clinical_risk.risk_tier.value.upper()} risk tier)."
-                )
-        elif ml_response.modality == InferenceModality.IMAGE_ONLY:
-            pos_paths = [f"{f.pathology} ({f.probability:.1%})" for f in ml_response.pathology_findings if f.positive]
-            if pos_paths:
-                parts.append(f"Chest radiograph visual evaluation identified: {', '.join(pos_paths)}.")
-            else:
-                parts.append("Chest radiograph visual evaluation found no findings above threshold.")
-            parts.append("Grad-CAM visual saliency indicates anatomical activation regions for radiologist review.")
-        else:
-            if ml_response.clinical_risk:
-                parts.append(
-                    f"EHR tabular telemetry evaluation indicates {ml_response.clinical_risk.risk_tier.value.upper()} "
-                    f"cardiovascular risk (calibrated probability: {ml_response.clinical_risk.calibrated_probability:.1%})."
-                )
-            if ml_response.explainability and ml_response.explainability.shap_feature_contributions:
-                top_3 = [
-                    f"{item['feature']} ({item['attribution']:+.2f})"
-                    for item in ml_response.explainability.shap_feature_contributions[:3]
-                ]
-                parts.append(f"Top clinical feature contributors: {', '.join(top_3)}.")
-
-        if ml_response.uncertainty.abstention_recommended:
-            parts.append(f"NOTE: AI abstention triggered due to: {'; '.join(ml_response.uncertainty.abstention_reasons)}.")
-
-        return " ".join(parts)
-
     def _to_prediction_response(
         self,
         record: PredictionRecord,
         explanation_override: Optional[ExplainabilityDetail] = None,
     ) -> PredictionResponse:
         """Convert a PredictionRecord ORM instance to a standard PredictionResponse schema."""
-        detailed = record.detailed_predictions or {}
-        pathology_findings = [
-            PathologyDetail(**f) for f in detailed.get("pathology_findings", [])
-        ]
-        clinical_risk = (
-            TabularRiskDetail(**detailed["clinical_risk"])
-            if detailed.get("clinical_risk")
-            else None
-        )
-        modality_gating = (
-            ModalityGatingDetail(**detailed["modality_gating"])
-            if detailed.get("modality_gating")
-            else None
-        )
-
-        unc_dict = detailed.get("uncertainty", {})
-        uncertainty = UncertaintyDetail(
-            entropy=unc_dict.get("entropy", 0.0),
-            confidence_score=unc_dict.get("confidence_score", record.confidence_score),
-            confidence_band=unc_dict.get("confidence_band", record.confidence_band.value),
-            cross_modal_conflict=unc_dict.get("cross_modal_conflict"),
-            abstention_recommended=unc_dict.get("abstention_recommended", record.status == PredictionStatus.ABSTAINED),
-            abstention_reasons=unc_dict.get(
-                "abstention_reasons",
-                [record.abstention_reason] if record.abstention_reason else [],
-            ),
-        )
-
-        explanation_detail = explanation_override
-        if explanation_detail is None and record.explanation is not None:
-            explanation_detail = ExplainabilityDetail(
-                id=record.explanation.id,
-                explanation_type=record.explanation.explanation_type.value,
-                heatmap_path=record.explanation.heatmap_path,
-                shap_values=record.explanation.shap_values,
-                top_features=record.explanation.top_features,
-                summary_text=record.explanation.summary_text,
-            )
-
-        return PredictionResponse(
-            id=record.id,
-            case_id=record.case_id,
-            model_type=record.model_type,
-            model_version=record.model_version,
-            primary_condition=record.primary_condition,
-            raw_probability=record.raw_probability,
-            calibrated_probability=record.calibrated_probability,
-            confidence_score=record.confidence_score,
-            confidence_band=record.confidence_band,
-            status=record.status,
-            abstention_reason=record.abstention_reason,
-            detailed_predictions=detailed,
-            pathology_findings=pathology_findings,
-            clinical_risk=clinical_risk,
-            modality_gating=modality_gating,
-            uncertainty=uncertainty,
-            inference_latency_ms=record.inference_latency_ms,
-            explanation=explanation_detail,
-            created_at=record.created_at,
-        )
+        return prediction_record_to_response(record, explanation_override)

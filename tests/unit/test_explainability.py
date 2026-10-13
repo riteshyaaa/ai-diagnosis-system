@@ -127,11 +127,20 @@ def test_shap_explainer_engine_tree_model():
     assert sum(result["feature_importance"].values()) > 0.0
 
 
+def test_shap_requires_explicit_background_data():
+    """A request row or random synthetic values must not become a SHAP baseline."""
+    model = XGBoostRiskClassifier(n_estimators=5, max_depth=2, calibration_method=None)
+    X = np.zeros((4, 13), dtype=np.float32)
+    model.fit(X, np.array([0, 0, 1, 1]))
+
+    with pytest.raises(ValueError, match="training-derived background"):
+        SHAPExplainerEngine(model=model).explain(X=X[:1])
+
+
 def test_shap_explainer_engine_deep_tabular():
     """Verify SHAP KernelExplainer works with TabularRiskMLP model."""
     np.random.seed(42)
     X = np.random.randn(100, 13).astype(np.float32)
-    y = np.random.randint(0, 2, size=100)
 
     model = TabularRiskMLP(input_dim=13, embedding_dim=128, hidden_dim=128)
     # Initialize model with a single forward pass so state dict is populated

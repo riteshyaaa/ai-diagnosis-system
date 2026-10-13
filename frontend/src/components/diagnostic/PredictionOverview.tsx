@@ -6,7 +6,6 @@ import React from "react";
 import {
   AlertOctagon,
   Clock,
-  ShieldCheck,
   CheckCircle,
   FileCheck,
 } from "lucide-react";
@@ -35,14 +34,14 @@ export const PredictionOverview: React.FC<PredictionOverviewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-              AI Diagnostic Assessment
+              Stored model output
             </span>
             <span className="rounded bg-primary-50 px-2 py-0.5 font-mono text-[10px] font-bold text-primary-700">
               {prediction.model_type} &bull; v{prediction.model_version}
             </span>
           </div>
           <h2 className="mt-1 text-xl font-extrabold text-gray-900">
-            {prediction.primary_condition || "Cardiovascular & Pulmonary Evaluation"}
+            {prediction.primary_condition || "Unspecified model output"}
           </h2>
         </div>
 
@@ -61,22 +60,22 @@ export const PredictionOverview: React.FC<PredictionOverviewProps> = ({
             }`}
           >
             {hasReview ? <CheckCircle className="h-4 w-4" /> : <FileCheck className="h-4 w-4" />}
-            <span>{hasReview ? "Edit Clinical Review" : "Submit Clinical Review"}</span>
+            <span>{hasReview ? "Record follow-up review" : "Record clinician review"}</span>
           </button>
         </div>
       </div>
 
-      {/* Safety Abstention Banner */}
+      {/* Abstention state reported by the stored model response */}
       {isAbstained && (
         <div className="mt-4 flex items-start gap-3 rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-900">
           <AlertOctagon className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
           <div>
             <h4 className="font-bold text-rose-950">
-              Safety Abstention Triggered &bull; Human Review Strictly Required
+              Model reported abstention
             </h4>
             <p className="mt-1 leading-relaxed">
               {prediction.abstention_reason ||
-                "Model confidence fell below clinical safety thresholds or elevated cross-modality conflict was detected. Automated recommendation is withheld."}
+                "This stored response is marked as abstained. No further reason was recorded."}
             </p>
           </div>
         </div>
@@ -86,28 +85,28 @@ export const PredictionOverview: React.FC<PredictionOverviewProps> = ({
       <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
         <ConfidenceGauge
           probability={prediction.raw_probability}
-          calibratedProbability={prediction.calibrated_probability}
+          calibratedProbability={null}
           confidenceScore={prediction.confidence_score}
           confidenceBand={prediction.confidence_band}
-          label="Platt/Isotonic Calibrated Risk"
+          label="Model-reported output (calibration unverified)"
           size="lg"
         />
 
         <div className="flex flex-col justify-between rounded-xl border border-gray-100 bg-gray-50/50 p-4 text-xs">
           <div>
             <span className="font-bold uppercase tracking-wider text-gray-500">
-              Clinical Context &amp; Governance
+              Response note
             </span>
             <p className="mt-2 text-gray-700 leading-relaxed">
               {prediction.clinical_disclaimer ||
-                "Assistive CDSS output only. Requires licensed physician validation before clinical action or patient communication."}
+                "Prototype output without demonstrated clinical validation. Do not use to guide patient care."}
             </p>
           </div>
 
           <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-3 text-[11px] text-gray-500">
             <span className="flex items-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
-              Concordance Monitored
+              <CheckCircle className={`h-3.5 w-3.5 ${hasReview ? "text-emerald-600" : "text-gray-400"}`} />
+              {hasReview ? "Review recorded" : "No review recorded"}
             </span>
             <span>Created: {new Date(prediction.created_at).toLocaleString()}</span>
           </div>

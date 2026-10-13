@@ -1,14 +1,9 @@
-"""
-MedFusion AI — Clinical Record Service.
+"""Clinical-record persistence, validation, and owner-scoped access.
 
-Orchestrates:
-- Tabular clinical measurement ingestion & validation
-- Case workflow status gating (editable in DRAFT/SUBMITTED)
-- Physiological plausibility validation
-- HIPAA/GDPR immutable audit logging (CLINICAL_RECORD_CREATE, VIEW, UPDATE, DELETE)
+Audit events are ordinary database rows and are not a compliance guarantee.
 """
 
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +14,7 @@ from app.models.clinical_record import ClinicalRecord
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.case_repository import CaseRepository
 from app.repositories.clinical_record_repository import ClinicalRecordRepository
+from app.security.record_access import require_case_owner
 from app.schemas.clinical_record import (
     ClinicalRecordCreate,
     ClinicalRecordListResponse,
@@ -53,8 +49,7 @@ class ClinicalRecordService:
         """
         # 1. Verify Case Existence
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, recorder_id)
 
         # 2. Case Workflow Status Constraint
         if case.status not in (CaseStatus.DRAFT, CaseStatus.SUBMITTED):
@@ -133,14 +128,18 @@ class ClinicalRecordService:
         record = await self.record_repo.get_by_id(record_id)
         if not record:
             raise NotFoundError("ClinicalRecord", record_id)
+        require_case_owner(
+            await self.case_repo.get_by_id(record.case_id), record.case_id, viewer_id
+        )
 
         return ClinicalRecordResponse.model_validate(record)
 
-    async def list_case_records(self, case_id: UUID) -> ClinicalRecordListResponse:
+    async def list_case_records(
+        self, case_id: UUID, viewer_id: UUID
+    ) -> ClinicalRecordListResponse:
         """Fetch all clinical measurement sets recorded for a case."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        require_case_owner(case, case_id, viewer_id)
 
         records = await self.record_repo.get_by_case_id(case_id)
         return ClinicalRecordListResponse(
@@ -162,7 +161,8 @@ class ClinicalRecordService:
             raise NotFoundError("ClinicalRecord", record_id)
 
         case = await self.case_repo.get_by_id(record.case_id)
-        if case and case.status != CaseStatus.DRAFT:
+        case = require_case_owner(case, record.case_id, updater_id)
+        if case.status != CaseStatus.DRAFT:
             raise ValidationError(
                 f"Cannot edit clinical record when case is in '{case.status.value}' status. Only DRAFT cases allow edits."
             )
@@ -210,7 +210,8 @@ class ClinicalRecordService:
             raise NotFoundError("ClinicalRecord", record_id)
 
         case = await self.case_repo.get_by_id(record.case_id)
-        if case and case.status != CaseStatus.DRAFT:
+        case = require_case_owner(case, record.case_id, user_id)
+        if case.status != CaseStatus.DRAFT:
             raise ValidationError(
                 f"Cannot delete clinical record when case is in '{case.status.value}' status. Only DRAFT cases allow deletion."
             )

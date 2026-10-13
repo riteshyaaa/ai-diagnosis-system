@@ -11,7 +11,8 @@ import type {
 
 export const patientService = {
   /**
-   * Register a new de-identified patient (auto-hashes MRN via SHA-256).
+   * Register a patient record. The backend stores a deterministic, unsalted SHA-256
+   * digest of the supplied reference; callers should use synthetic values only.
    */
   async createPatient(payload: PatientCreatePayload): Promise<Patient> {
     const { data } = await api.post<Patient>("/patients", payload);

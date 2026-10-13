@@ -1,14 +1,7 @@
-"""
-MedFusion AI — Unified Multimodal AI Inference Service.
+"""Experimental inference pipeline for supported image and tabular inputs.
 
-Coordinates the end-to-end clinical inference pipeline:
-- Ingestion & validation of DICOM/RGB chest radiographs and structured EHR tabular parameters
-- Cryptographic SHA-256 patient identifier hashing ensuring strict privacy compliance
-- Multi-modality routing (Vision-only, Tabular-only, and Multimodal Late Fusion)
-- Calibrated probability estimation and cardiovascular clinical risk tiering
-- XAI generation: Grad-CAM thoracic localization heatmaps and SHAP clinical feature attributions
-- Clinical safety abstention engine detecting low-confidence, borderline, and cross-modal conflicting cases
-- Mandatory non-autonomous Clinical Decision Support System (CDSS) regulatory disclaimers
+Architectures and heuristics in this module have no demonstrated clinical validation.
+Model outputs remain disabled in the application until compatible artifacts are verified.
 """
 
 import base64
@@ -25,7 +18,6 @@ import numpy as np
 from PIL import Image
 import torch
 
-from ml.config import ImageModelConfig, TabularModelConfig
 from ml.datasets.chest_xray.quality_validator import ImageQualityValidator
 from ml.datasets.chest_xray.transforms import MedicalImageTransforms
 from ml.datasets.heart_disease.constants import CORE_FEATURE_NAMES
@@ -44,7 +36,7 @@ from ml.inference.schemas import (
     TabularRiskFinding,
     UncertaintyEstimation,
 )
-from ml.registry.registry import ModelRegistry, ModelType
+from ml.registry.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +50,7 @@ TARGET_PATHOLOGIES = [
 
 
 class UnifiedInferenceService:
-    """
-    Production-grade Unified Inference Engine for MedFusion AI.
-    Handles multimodal diagnosis, uncertainty estimation, and auditable explainability.
-    """
+    """Experimental inference orchestration; not a clinically validated system."""
 
     def __init__(
         self,
@@ -108,7 +97,7 @@ class UnifiedInferenceService:
 
     @staticmethod
     def hash_patient_mrn(mrn: Optional[str]) -> Optional[str]:
-        """Cryptographically hash patient Medical Record Number (MRN) with SHA-256."""
+        """Hash an MRN with unkeyed SHA-256; this does not de-identify it."""
         if not mrn or not mrn.strip():
             return None
         return hashlib.sha256(mrn.strip().encode("utf-8")).hexdigest()
@@ -297,27 +286,49 @@ class UnifiedInferenceService:
     def _generate_shap_artifacts(
         self,
         tabular_array: np.ndarray,
-    ) -> Tuple[List[Dict[str, Any]], float]:
+        background_data: Optional[np.ndarray] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[float]]:
         """
-        Compute SHAP feature attributions for tabular clinical inputs.
+        Compute signed per-sample SHAP values only with explicit background data.
         """
+        if background_data is None:
+            logger.info("SHAP attribution unavailable: no training-derived background artifact is configured.")
+            return [], None
+
         try:
             explainer_engine = SHAPExplainerEngine(model=self._tabular_model)
             shap_res = explainer_engine.explain(
                 X=tabular_array,
+                background_data=background_data,
                 feature_names=CORE_FEATURE_NAMES,
                 n_samples=25,
             )
-            top_features = []
-            feat_dict = shap_res.get("feature_importance", {})
-            for name, val in feat_dict.items():
-                top_features.append({"feature": name, "attribution": float(val)})
+            values = np.asarray(shap_res.get("shap_values"), dtype=np.float64)
+            if values.ndim == 3 and values.shape[-1] == 2:
+                values = values[:, :, 1]
+            if values.ndim != 2 or values.shape[1] != len(CORE_FEATURE_NAMES) or values.shape[0] == 0:
+                logger.warning("SHAP attribution unavailable: unexpected output shape %s", values.shape)
+                return [], None
 
-            base_val = float(shap_res.get("base_value", 0.5))
+            base_value = shap_res.get("base_value")
+            if base_value is None or not np.isfinite(float(base_value)):
+                logger.warning("SHAP attribution unavailable: explainer returned no finite baseline value.")
+                return [], None
+
+            ranked = sorted(
+                zip(CORE_FEATURE_NAMES, values[0].tolist()),
+                key=lambda item: abs(item[1]),
+                reverse=True,
+            )
+            top_features = [
+                {"feature": name, "attribution": float(value)}
+                for name, value in ranked
+            ]
+            base_val = float(base_value)
             return top_features, base_val
         except Exception as e:
             logger.warning("SHAP generation failed: %s", e)
-            return [], 0.5
+            return [], None
 
     def explain_pathology(
         self,
@@ -448,15 +459,16 @@ class UnifiedInferenceService:
                 img_w = float(gates[0])
                 tab_w = float(gates[1])
             else:
-                img_w, tab_w = 0.5, 0.5
+                img_w, tab_w = None, None
 
-            dominant = "Radiograph Visual Features" if img_w >= tab_w else "EHR Tabular Risk Parameters"
-            modality_gating = ModalityGatingWeights(
-                image_weight=round(img_w, 4),
-                tabular_weight=round(tab_w, 4),
-                dominant_modality=dominant,
-            )
-            model_meta["fusion_strategy"] = getattr(self._fusion_model, "fusion_strategy", "gated")
+            if img_w is not None and tab_w is not None:
+                dominant = "Radiograph Visual Features" if img_w >= tab_w else "EHR Tabular Risk Parameters"
+                modality_gating = ModalityGatingWeights(
+                    image_weight=round(img_w, 4),
+                    tabular_weight=round(tab_w, 4),
+                    dominant_modality=dominant,
+                )
+                model_meta["fusion_strategy"] = getattr(self._fusion_model, "fusion_strategy", None)
 
         # --- IMAGE ONLY INFERENCE ---
         elif modality == InferenceModality.IMAGE_ONLY:

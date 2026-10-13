@@ -11,17 +11,20 @@ import {
   Filter,
   ArrowRight,
   Clock,
+  AlertCircle,
 } from "lucide-react";
 import { caseService } from "../services/cases.service";
 import { DiagnosticCase, CaseStatus } from "../types";
 import { CaseStatusBadge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
+import { apiErrorMessage } from "../utils/apiError";
 
 export const CasesPage: React.FC = () => {
   const [cases, setCases] = useState<DiagnosticCase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchCases = async () => {
@@ -29,8 +32,8 @@ export const CasesPage: React.FC = () => {
       try {
         const response = await caseService.listCases({ limit: 50 });
         setCases(response.items || []);
-      } catch (err) {
-        console.error("Failed to load clinical cases:", err);
+      } catch (error: unknown) {
+        setLoadError(apiErrorMessage(error, "Failed to load cases."));
       } finally {
         setIsLoading(false);
       }
@@ -58,7 +61,7 @@ export const CasesPage: React.FC = () => {
             Clinical Diagnostic Worklist
           </h1>
           <p className="text-xs text-gray-500">
-            Active patient diagnostic cases with multimodal vision &amp; telemetry inference
+            Cases visible to your account.
           </p>
         </div>
 
@@ -109,12 +112,17 @@ export const CasesPage: React.FC = () => {
         <div className="flex h-64 items-center justify-center">
           <LoadingSpinner size="lg" message="Loading clinical diagnostic queue..." />
         </div>
+      ) : loadError ? (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{loadError}</span>
+        </div>
       ) : filteredCases.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white p-12 text-center">
           <Files className="h-12 w-12 text-gray-300" />
           <h3 className="mt-3 text-sm font-bold text-gray-700">No Diagnostic Cases Found</h3>
           <p className="mt-1 text-xs text-gray-400">
-            Create your first multimodal diagnostic case to begin CDSS evaluation.
+            No matching cases were returned for this account and filter.
           </p>
           <Link
             to="/cases/new"
@@ -143,9 +151,7 @@ export const CasesPage: React.FC = () => {
                 <h3 className="mt-3 text-base font-bold text-gray-900 group-hover:text-primary-600 transition-colors line-clamp-1">
                   {c.chief_complaint || `Case ${c.case_number || c.id.slice(0, 8)}`}
                 </h3>
-                <p className="mt-1 text-xs text-gray-500 line-clamp-2">
-                  {c.clinical_notes || "Multimodal thoracic & cardiovascular diagnostic assessment."}
-                </p>
+                <p className="mt-1 text-xs text-gray-500">Modality: {String(c.modality).replace(/_/g, " ")}</p>
               </div>
 
               <div className="mt-5 border-t border-gray-100 pt-3">

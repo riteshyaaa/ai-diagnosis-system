@@ -7,6 +7,7 @@ import type {
   ClinicalRecord,
   ClinicalRecordCreatePayload,
   ClinicalRecordListResponse,
+  ClinicalRecordUpdatePayload,
   ClinicalRecordWithValidationResponse,
 } from "../types";
 
@@ -30,6 +31,20 @@ export const clinicalRecordService = {
    */
   async getRecordById(recordId: string): Promise<ClinicalRecord> {
     const { data } = await api.get<ClinicalRecord>(`/clinical-records/${recordId}`);
+    return data;
+  },
+
+  /**
+   * Update a structured record while its case remains in DRAFT status.
+   */
+  async updateRecord(
+    recordId: string,
+    payload: ClinicalRecordUpdatePayload
+  ): Promise<ClinicalRecord> {
+    const { data } = await api.patch<ClinicalRecord>(
+      `/clinical-records/${recordId}`,
+      payload
+    );
     return data;
   },
 

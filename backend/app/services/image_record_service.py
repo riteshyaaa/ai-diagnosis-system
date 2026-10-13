@@ -5,7 +5,7 @@ Manages image lifecycle, case association, file serving, and audit logging.
 """
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.models.image_record import ImageRecord, ImageType
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.case_repository import CaseRepository
 from app.repositories.image_repository import ImageRepository
+from app.security.record_access import require_case_owner
 from app.schemas.image import (
     ImageListResponse,
     ImageQualityReportSchema,
@@ -53,8 +54,7 @@ class ImageRecordService:
         """
         # 1. Verify case exists and allows image uploads (DRAFT or SUBMITTED)
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        case = require_case_owner(case, case_id, uploader_id)
 
         if case.status not in (CaseStatus.DRAFT, CaseStatus.SUBMITTED):
             raise ValidationError(
@@ -134,6 +134,8 @@ class ImageRecordService:
         image = await self.image_repo.get_by_id(image_id)
         if not image:
             raise NotFoundError("ImageRecord", image_id)
+        case = await self.case_repo.get_by_id(image.case_id)
+        require_case_owner(case, image.case_id, viewer_id)
 
         await self.audit_repo.log_event(
             action=AuditAction.IMAGE_VIEW,
@@ -147,11 +149,12 @@ class ImageRecordService:
 
         return ImageRecordResponse.model_validate(image)
 
-    async def list_case_images(self, case_id: UUID) -> ImageListResponse:
+    async def list_case_images(
+        self, case_id: UUID, viewer_id: UUID
+    ) -> ImageListResponse:
         """Fetch all images linked to a diagnostic case."""
         case = await self.case_repo.get_by_id(case_id)
-        if not case:
-            raise NotFoundError("DiagnosticCase", case_id)
+        require_case_owner(case, case_id, viewer_id)
 
         images = await self.image_repo.get_by_case_id(case_id)
         return ImageListResponse(
@@ -163,11 +166,14 @@ class ImageRecordService:
         self,
         image_id: UUID,
         variant: str = "processed",  # "raw", "processed", "thumbnail"
+        viewer_id: Optional[UUID] = None,
     ) -> Path:
         """Get absolute path to image file on local storage."""
         image = await self.image_repo.get_by_id(image_id)
         if not image:
             raise NotFoundError("ImageRecord", image_id)
+        case = await self.case_repo.get_by_id(image.case_id)
+        require_case_owner(case, image.case_id, viewer_id)
 
         base_upload = Path(self.settings.upload_dir).resolve()
 
@@ -199,7 +205,8 @@ class ImageRecordService:
             raise NotFoundError("ImageRecord", image_id)
 
         case = await self.case_repo.get_by_id(image.case_id)
-        if case and case.status != CaseStatus.DRAFT:
+        case = require_case_owner(case, image.case_id, user_id)
+        if case.status != CaseStatus.DRAFT:
             raise ValidationError(
                 f"Cannot delete images from case in '{case.status.value}' status. Only DRAFT cases can be modified."
             )

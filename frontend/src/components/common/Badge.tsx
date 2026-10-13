@@ -78,16 +78,16 @@ export const ConfidenceBandBadge: React.FC<{ band: ConfidenceBand | string }> = 
   switch (band?.toLowerCase()) {
     case ConfidenceBand.HIGH:
     case "high":
-      return <Badge variant="success">High Confidence</Badge>;
+      return <Badge variant="success">Reported band: high</Badge>;
     case ConfidenceBand.MODERATE:
     case "moderate":
-      return <Badge variant="warning">Moderate Confidence</Badge>;
+      return <Badge variant="warning">Reported band: moderate</Badge>;
     case ConfidenceBand.LOW:
     case "low":
-      return <Badge variant="danger">Low Confidence</Badge>;
+      return <Badge variant="danger">Reported band: low</Badge>;
     case ConfidenceBand.ABSTAIN:
     case "abstain":
-      return <Badge variant="danger">Abstained (Safety)</Badge>;
+      return <Badge variant="danger">Reported abstention</Badge>;
     default:
       return <Badge>{band}</Badge>;
   }

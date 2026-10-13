@@ -2,16 +2,17 @@
  * MedFusion AI — Radiograph & DICOM Upload Component
  */
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { UploadCloud, FileText, CheckCircle2, AlertTriangle, Eye } from "lucide-react";
 import { imageService } from "../../services/images.service";
-import { ImageType, ImageRecord } from "../../types";
+import { ImageType, type ImageRecord, type ImageQualityReport } from "../../types";
+import { apiErrorMessage } from "../../utils/apiError";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 
 interface RadiographUploaderProps {
   caseId?: string;
-  onUploadSuccess: (image: ImageRecord) => void;
+  onUploadSuccess: (image: ImageRecord, qualityReport: ImageQualityReport) => void;
 }
 
 export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
@@ -20,9 +21,14 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
 }) => {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [imageType, setImageType] = useState<ImageType>(ImageType.CHEST_XRAY_PA);
+  const [imageType, setImageType] = useState<ImageType | "">("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -31,7 +37,7 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
     setFile(selected);
     setUploadError(null);
 
-    // If it's a standard web image, create a preview
+    // Browser previews are available only for standard web images.
     if (selected.type.startsWith("image/")) {
       const url = URL.createObjectURL(selected);
       setPreviewUrl(url);
@@ -46,7 +52,7 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
     accept: {
       "image/png": [".png"],
       "image/jpeg": [".jpg", ".jpeg"],
-      "application/dicom": [".dcm"],
+      "application/dicom": [".dcm", ".dicom"],
     },
     maxFiles: 1,
     maxSize: 50 * 1024 * 1024, // 50MB
@@ -58,10 +64,10 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
     setUploadError(null);
 
     try {
-      const res = await imageService.uploadImage(caseId, file, imageType);
-      onUploadSuccess(res.image);
-    } catch (err: any) {
-      setUploadError(err?.response?.data?.detail || "Failed to ingest radiograph artifact.");
+      const res = await imageService.uploadImage(caseId, file, imageType || undefined);
+      onUploadSuccess(res.image, res.quality_report);
+    } catch (error: unknown) {
+      setUploadError(apiErrorMessage(error, "Failed to ingest radiograph artifact."));
     } finally {
       setIsUploading(false);
     }
@@ -75,12 +81,9 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
             Medical Radiograph Ingestion
           </h3>
           <p className="text-xs text-gray-500">
-            Upload DICOM (.dcm) or Standard Medical X-Ray (PNG / JPEG)
+            Upload a DICOM file or a PNG/JPEG image for server-side validation.
           </p>
         </div>
-        <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-100">
-          DenseNet Ingestion Ready
-        </span>
       </div>
 
       {uploadError && (
@@ -93,17 +96,17 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
       {/* Metadata Form */}
       <div className="mt-4">
         <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
-          Radiograph Acquisition &amp; Projection Type
+          Optional projection override
         </label>
         <select
           value={imageType}
-          onChange={(e) => setImageType(e.target.value as ImageType)}
+          onChange={(e) => setImageType(e.target.value as ImageType | "")}
           className="mt-1 block w-full rounded-lg border border-gray-200 bg-gray-50/50 px-2.5 py-1.5 text-xs text-gray-800 focus:border-primary-500 focus:bg-white focus:outline-none"
         >
+          <option value="">Use DICOM metadata or server default</option>
           <option value={ImageType.CHEST_XRAY_PA}>Chest X-Ray (PA Projection)</option>
           <option value={ImageType.CHEST_XRAY_AP}>Chest X-Ray (AP Projection)</option>
-          <option value={ImageType.CHEST_CT_AXIAL}>Chest CT (Axial Slice)</option>
-          <option value={ImageType.CHEST_CT_CORONAL}>Chest CT (Coronal Slice)</option>
+          <option value={ImageType.CHEST_XRAY_LATERAL}>Chest X-Ray (Lateral Projection)</option>
           <option value={ImageType.OTHER}>Other Radiographic Modality</option>
         </select>
       </div>
@@ -144,7 +147,7 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
               {(file.size / (1024 * 1024)).toFixed(2)} MB &bull; {file.type || "DICOM Stream"}
             </p>
             <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
-              <CheckCircle2 className="h-3 w-3" /> Ready for Upload
+              <CheckCircle2 className="h-3 w-3" /> Selected; server validation pending
             </span>
           </div>
         ) : (
@@ -156,7 +159,7 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
               Drag & drop CXR/DICOM file, or <span className="text-primary-600 underline">browse files</span>
             </p>
             <p className="mt-1 text-[10px] text-gray-400">
-              Supports .dcm, .png, .jpeg (Max 50MB) &bull; Automatic Quality Filtering
+              Accepts .dcm, .dicom, .png, and .jpeg up to 50 MB. The server checks format and image quality.
             </p>
           </div>
         )}
@@ -176,7 +179,7 @@ export const RadiographUploader: React.FC<RadiographUploaderProps> = ({
             ) : (
               <>
                 <Eye className="h-3.5 w-3.5" />
-                Upload & Ingest Radiograph
+                Upload and validate image
               </>
             )}
           </button>

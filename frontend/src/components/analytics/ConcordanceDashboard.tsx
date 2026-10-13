@@ -1,230 +1,154 @@
-/**
- * MedFusion AI — Clinical Concordance & Human-AI Alignment Analytics Dashboard
- */
-
 import React, { useEffect, useState } from "react";
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
   Bar,
+  BarChart,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
-import {
-  BarChart3,
-  ShieldCheck,
-} from "lucide-react";
+import { BarChart3 } from "lucide-react";
+
 import { reviewService } from "../../services/reviews.service";
-import { ClinicalReviewStatsResponse } from "../../types";
+import type { ClinicalReviewStatsResponse } from "../../types";
+import { apiErrorMessage } from "../../utils/apiError";
 import { LoadingSpinner } from "../common/LoadingSpinner";
+
+const decisionColors = ["#10b981", "#f59e0b", "#64748b"];
 
 export const ConcordanceDashboard: React.FC = () => {
   const [stats, setStats] = useState<ClinicalReviewStatsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchStats = async () => {
-      setIsLoading(true);
-      try {
-        const data = await reviewService.getStatistics();
-        setStats(data);
-      } catch (err: any) {
-        // Fallback realistic stats if backend is empty in dev
-        setStats({
-          total_reviews: 48,
-          accepted_count: 41,
-          modified_count: 5,
-          rejected_count: 2,
-          concordance_rate: 0.854,
-          modification_rate: 0.104,
-          rejection_rate: 0.042,
-          top_modified_diagnoses: [
-            { diagnosis: "Cardiomegaly", count: 3 },
-            { diagnosis: "Atelectasis", count: 2 },
-          ],
-          recent_reviews: [],
-          clinical_disclaimer: "Quality assurance concordance telemetry.",
-        });
-      } finally {
-        setIsLoading(false);
-      }
+    let active = true;
+    reviewService
+      .getStatistics()
+      .then((result) => {
+        if (active) setStats(result);
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setError(
+            apiErrorMessage(cause, "Could not load review statistics from the server."),
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
     };
-    fetchStats();
   }, []);
 
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <LoadingSpinner size="lg" message="Compiling physician concordance metrics..." />
+        <LoadingSpinner size="lg" message="Loading recorded review statistics..." />
       </div>
     );
   }
 
-  const decisionPieData = [
-    { name: "Accepted", value: stats?.accepted_count || 0, color: "#10b981" },
-    { name: "Modified", value: stats?.modified_count || 0, color: "#f59e0b" },
-    { name: "Rejected", value: stats?.rejected_count || 0, color: "#ef4444" },
+  if (error || !stats) {
+    return (
+      <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800">
+        {error || "Review statistics are unavailable."}
+      </div>
+    );
+  }
+
+  const decisionData = [
+    { name: "Accepted", value: stats.accepted_count },
+    { name: "Modified", value: stats.modified_count },
+    { name: "Rejected", value: stats.rejected_count },
   ];
-
-  const topModifiedData = stats?.top_modified_diagnoses
-    ? stats.top_modified_diagnoses.map((item) => ({
-        diagnosis: item.diagnosis,
-        count: item.count,
-      }))
-    : [];
-
-  const concordancePercent = ((stats?.concordance_rate || 0) * 100).toFixed(1);
+  const modifiedData = stats.top_modified_diagnoses.map((item) => ({
+    diagnosis: item.diagnosis,
+    count: item.count,
+  }));
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-gray-900 flex items-center gap-2">
-            <BarChart3 className="h-6 w-6 text-primary-600" />
-            Human-AI Diagnostic Concordance
-          </h1>
-          <p className="text-xs text-gray-500">
-            Real-world physician agreement rates, clinical modification frequency, and safety telemetry
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-200">
-          <ShieldCheck className="h-4 w-4 text-emerald-600" />
-          Continuous Quality Assurance
-        </span>
+      <div>
+        <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight text-gray-900">
+          <BarChart3 className="h-6 w-6 text-primary-600" />
+          Recorded clinical reviews
+        </h1>
+        <p className="mt-1 text-xs text-gray-600">
+          Descriptive counts from reviews stored in this workspace. These values do not establish model accuracy or clinical performance.
+        </p>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-            Overall Concordance
-          </span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-emerald-600">{concordancePercent}%</span>
-            <span className="text-xs text-gray-400">Target &gt; 85%</span>
-          </div>
-          <p className="mt-1 text-[11px] text-gray-500">Physician validation agreement</p>
+      {stats.total_reviews === 0 ? (
+        <div role="status" className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-600">
+          No review decisions have been recorded.
         </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-            Total Validated Cases
-          </span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-gray-900">{stats?.total_reviews || 0}</span>
-            <span className="text-xs text-gray-400">Signed Reviews</span>
-          </div>
-          <p className="mt-1 text-[11px] text-gray-500">Human-in-the-loop audited</p>
-        </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-            Acceptance Count
-          </span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-primary-600">{stats?.accepted_count || 0}</span>
-            <span className="text-xs text-gray-400">
-              ({stats?.total_reviews ? Math.round(((stats.accepted_count || 0) / stats.total_reviews) * 100) : 0}%)
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-gray-500">Unmodified AI assessments</p>
-        </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-            Discordance / Rejections
-          </span>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-3xl font-black text-rose-600">{stats?.rejected_count || 0}</span>
-            <span className="text-xs text-gray-400">
-              ({stats?.total_reviews ? Math.round(((stats.rejected_count || 0) / stats.total_reviews) * 100) : 0}%)
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-gray-500">Retraining feedback queue</p>
-        </div>
-      </div>
-
-      {/* Visual Analytics Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Decision Breakdown Pie */}
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="border-b border-gray-100 pb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-900">
-              Supervisory Decision Distribution
-            </h3>
-            <p className="text-xs text-gray-500">
-              Proportion of Accepted vs Modified vs Rejected predictions
-            </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <Metric label="Review decisions" value={stats.total_reviews} />
+            <Metric label="Accepted" value={stats.accepted_count} />
+            <Metric label="Modified" value={stats.modified_count} />
+            <Metric label="Rejected" value={stats.rejected_count} />
           </div>
 
-          <div className="h-64 w-full mt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={decisionPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {decisionPieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                  formatter={(value, entry: any) => (
-                    <span className="text-xs font-semibold text-gray-700">
-                      {value}: {entry.payload.value}
-                    </span>
-                  )}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Top Modified Diagnoses Bar Chart */}
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="border-b border-gray-100 pb-3">
-            <h3 className="text-sm font-bold uppercase tracking-wider text-gray-900">
-              Top Clinically Modified Diagnoses
-            </h3>
-            <p className="text-xs text-gray-500">
-              Frequency of diagnostic refinement by supervising clinicians
-            </p>
-          </div>
-
-          <div className="h-64 w-full mt-4">
-            {topModifiedData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topModifiedData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                  <XAxis dataKey="diagnosis" tick={{ fontSize: 11, fill: "#4b5563" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} allowDecimals={false} />
-                  <Tooltip
-                    formatter={(val: number) => [`${val} modifications`, "Count"]}
-                  />
-                  <Bar dataKey="count" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-full items-center justify-center text-xs text-gray-400">
-                No diagnostic modifications logged yet.
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-sm font-bold text-gray-900">Recorded decision counts</h2>
+              <div className="mt-4 h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={decisionData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
+                      {decisionData.map((entry, index) => (
+                        <Cell key={entry.name} fill={decisionColors[index]} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            )}
+              <p className="text-xs text-gray-500">
+                Accepted review share: {stats.concordance_rate.toFixed(1)}% of recorded decisions.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h2 className="text-sm font-bold text-gray-900">Modified diagnoses</h2>
+              <div className="mt-4 h-64">
+                {modifiedData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={modifiedData} margin={{ top: 10, right: 24, left: 0, bottom: 8 }}>
+                      <XAxis dataKey="diagnosis" tick={{ fontSize: 11, fill: "#4b5563" }} />
+                      <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-xs text-gray-500">
+                    No modified diagnoses have been recorded.
+                  </div>
+                )}
+              </div>
+            </section>
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 };
+
+const Metric: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+  <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <span className="text-xs font-bold uppercase tracking-wider text-gray-500">{label}</span>
+    <p className="mt-2 text-3xl font-black text-gray-900">{value}</p>
+  </div>
+);

@@ -1,16 +1,10 @@
-"""
-MedFusion AI — Explainable AI (XAI) & Heatmap Artifact Serving Endpoints (v1).
+"""Routes for reading stored attribution artifacts and requesting recalculation.
 
-Exposes routes for:
-- GET  /predictions/{prediction_id}/explanation      Full composite explanation (Visual + Tabular + Gating)
-- GET  /predictions/{prediction_id}/heatmap          Stream Grad-CAM visual heatmap overlay image file
-- GET  /predictions/{prediction_id}/features         SHAP feature attribution waterfall and rankings
-- GET  /cases/{case_id}/explanations                 List all historical explanation records for a case
-- POST /predictions/{prediction_id}/explain-pathology Recalculate Grad-CAM on-demand for alternative pathology
+Artifacts may be absent when no compatible model produced them; returned attribution
+is not clinically validated or evidence of disease localization.
 """
 
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import FileResponse
@@ -40,9 +34,9 @@ router = APIRouter(tags=["Explainable AI (XAI) & Artifacts"])
     status_code=status.HTTP_200_OK,
     summary="Get Prediction Explanation",
     description=(
-        "Retrieve composite clinical explanation for an AI prediction. "
-        "Includes Grad-CAM visual attention regions, SHAP tabular feature attributions, "
-        "modality late-fusion gating weights, clinical summary text, and mandatory CDSS disclaimers."
+        "Retrieve explanation artifacts that were actually stored for this prediction. "
+        "Visual attribution, tabular attribution, or modality details may be absent when "
+        "the required model artifact was unavailable. Stored attribution is not clinically validated."
     ),
 )
 async def get_prediction_explanation(
@@ -68,8 +62,11 @@ async def get_prediction_explanation(
     "/predictions/{prediction_id}/heatmap",
     response_class=FileResponse,
     status_code=status.HTTP_200_OK,
-    summary="Stream Grad-CAM Heatmap Image",
-    description="Securely stream the Grad-CAM visual overlay PNG image file for the given prediction.",
+    summary="Download Stored Heatmap Artifact",
+    description=(
+        "Download a heatmap PNG only when one was generated and stored for this prediction. "
+        "A heatmap is model attribution and does not establish disease localization."
+    ),
 )
 async def get_prediction_heatmap(
     prediction_id: UUID,
@@ -77,7 +74,7 @@ async def get_prediction_heatmap(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db),
 ) -> FileResponse:
-    """Stream the raw Grad-CAM radiograph overlay image artifact."""
+    """Stream a previously stored heatmap artifact."""
     service = ExplainabilityService(session)
     ip_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
@@ -100,11 +97,11 @@ async def get_prediction_heatmap(
     "/predictions/{prediction_id}/features",
     response_model=FeatureAttributionsResponse,
     status_code=status.HTTP_200_OK,
-    summary="Get SHAP Feature Attributions",
+    summary="Get Stored Feature Attributions",
     description=(
-        "Retrieve structured SHAP clinical feature waterfall breakdown. "
-        "Provides importance ranks, directional impact (risk increasing vs decreasing), "
-        "percentage contributions, physiological reference ranges, and contextual interpretations."
+        "Retrieve tabular attribution values stored for this prediction, when available. "
+        "The endpoint does not infer clinical reference ranges or causal effects; attribution "
+        "requires a compatible model and a provenance-backed background dataset."
     ),
 )
 async def get_feature_attributions(
@@ -156,11 +153,11 @@ async def get_case_explanations(
     "/predictions/{prediction_id}/explain-pathology",
     response_model=VisualExplanationResponse,
     status_code=status.HTTP_200_OK,
-    summary="Recalculate Pathology Saliency",
+    summary="Request Alternate Visual Attribution",
     description=(
-        "On-demand recalculation of Grad-CAM visual activation heatmaps and localized "
-        "attention bounding boxes for an alternative thoracic pathology condition "
-        "(e.g. Atelectasis, Cardiomegaly, Effusion, Infiltration, Mass)."
+        "Request model-derived visual attribution for an alternate supported target. This "
+        "operation is unavailable when the required compatible model artifact is missing. "
+        "Attribution does not establish anatomical disease localization."
     ),
 )
 async def recalculate_pathology_saliency(
@@ -170,7 +167,7 @@ async def recalculate_pathology_saliency(
     current_user: User = Depends(require_clinical_staff),
     session: AsyncSession = Depends(get_db),
 ) -> VisualExplanationResponse:
-    """Recompute Grad-CAM visual saliency on-demand for a specific pathology."""
+    """Request visual attribution for a target when a compatible model is available."""
     service = ExplainabilityService(session)
     ip_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")

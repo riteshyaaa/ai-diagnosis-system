@@ -41,6 +41,7 @@ class PatientRepository(BaseRepository[Patient]):
 
     async def filter_patients(
         self,
+        creator_id: UUID,
         sex: Optional[BiologicalSex] = None,
         min_age: Optional[int] = None,
         max_age: Optional[int] = None,
@@ -48,7 +49,7 @@ class PatientRepository(BaseRepository[Patient]):
         limit: int = 50,
     ) -> List[Patient]:
         """Filter patients by demographic attributes with pagination."""
-        stmt = select(Patient)
+        stmt = select(Patient).where(Patient.created_by_id == creator_id)
         if sex is not None:
             stmt = stmt.where(Patient.sex == sex)
         if min_age is not None:
