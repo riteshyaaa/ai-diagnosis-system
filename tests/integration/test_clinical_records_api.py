@@ -28,7 +28,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.clin.tester@
             "email": email,
             "full_name": "Dr. Clinical Tester",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Cardiology",
         },
     )

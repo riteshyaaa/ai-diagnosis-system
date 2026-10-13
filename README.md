@@ -1,18 +1,17 @@
-# MedFusion AI — Multimodal Medical Diagnosis & Clinical Decision Support System
+# MedFusion AI — Clinical Decision Support Prototype
 
-> **⚠️ Medical Disclaimer**: MedFusion AI is an assistive clinical decision support tool designed exclusively for qualified healthcare professionals. It does **not** provide autonomous medical diagnosis and is **never** intended to replace the clinical judgment of a licensed physician.
+> **Research prototype only.** This repository is not clinically validated and must not be used to diagnose, triage, or guide treatment. No trained model checkpoint is included; inference remains unavailable until a verified model is supplied and promoted. It does not establish HIPAA, GDPR, 21 CFR Part 11, or other regulatory compliance.
 
 ---
 
 ## 🏥 Overview
 
-**MedFusion AI** is an enterprise-grade multimodal artificial intelligence platform that combines medical imaging analysis (chest X-rays) with structured clinical health parameters (tabular laboratory/vitals data) using late-fusion deep learning. The system provides:
+**MedFusion AI** is a software prototype with a React/TypeScript frontend, FastAPI backend, PostgreSQL data model, and experimental ML code for chest-radiograph, tabular, and multimodal workflows. The repository includes:
 
-- **Multimodal AI Inference** — Combines DenseNet-121 image embeddings with clinical risk predictors for joint diagnostic support.
-- **Explainable AI (XAI)** — Grad-CAM visual heatmaps for radiology and SHAP feature importance for clinical values.
-- **Calibrated Uncertainty Estimation** — Temperature-scaled prediction probabilities with explicit confidence banding and safety abstention thresholds.
-- **Human-in-the-Loop Review Workflow** — Clinicians review, accept, modify, or reject AI findings with mandatory rationale recording.
-- **Enterprise Security & Compliance** — JWT authentication, RBAC, encrypted storage, immutable audit logging, and strict data anonymization.
+- API, persistence, and UI code for authentication, patients, cases, uploads, clinical records, predictions, and reviews; these workflows still require runtime verification.
+- Model architectures, synthetic-data experiments, preprocessing, training, and evaluation code; these are research components, not evidence of model performance.
+- A fail-closed model registry: absent or unverified weights do not produce predictions.
+- A security/audit status overview in [`docs/IMPLEMENTATION_AUDIT.md`](docs/IMPLEMENTATION_AUDIT.md).
 
 ---
 
@@ -46,15 +45,15 @@
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-org/medfusion-ai.git
-cd ai_diagnosis
+git clone https://github.com/riteshyaaa/ai-diagnosis-system.git
+cd ai-diagnosis-system
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env with your secrets
+# Replace the example database password and JWT secret before use
 
 # 3. Build and run all services
-docker compose -f docker/docker-compose.yml up --build -d
+docker compose --env-file .env -f docker/docker-compose.yml up --build -d
 
 # 4. Open in browser:
 # Frontend:  http://localhost
@@ -65,24 +64,26 @@ docker compose -f docker/docker-compose.yml up --build -d
 ### Option 2: Local Development
 
 ```bash
-# Backend
-cd backend
+# Backend (from repository root)
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt
+pip install -r backend/requirements-dev.txt -r ml/requirements.txt
 # For local demo logins, set APP_ENV=development, DEBUG=true, and
 # DEMO_USERS_ENABLED=true in the repository-root .env file.
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --app-dir backend --reload --port 8000
 
 # Frontend (in another terminal)
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 When `DEMO_USERS_ENABLED=true`, the backend seeds the demo personas only when
 `APP_ENV=development` and `DEBUG=true`. The Quick Login buttons use
 `MedFusion#2026Secure!`; demo accounts must not be enabled in production.
+These setup commands have not yet been verified end-to-end. The repository contains
+no deployable weights, so prediction endpoints return service unavailable until a
+verified artifact is registered and explicitly promoted.
 
 ---
 
@@ -98,8 +99,8 @@ ai_diagnosis/
 │   │   ├── services/         # Business Logic Layer
 │   │   ├── repositories/     # Data Access Layer
 │   │   ├── security/         # JWT, Password Hashing, RBAC
-│   │   ├── middleware/       # Security Headers, Logging, Rate Limiting
-│   │   ├── utils/            # Helpers, PDF Generator
+│   │   ├── middleware/       # Security headers and request logging
+│   │   ├── utils/            # Shared helpers
 │   │   ├── config.py         # Application Settings
 │   │   ├── exceptions.py     # Custom Exceptions
 │   │   └── main.py           # FastAPI Application Factory
@@ -148,14 +149,14 @@ ai_diagnosis/
 │   ├── DATASET.md            # Dataset Attribution & Schemas
 │   └── TESTING.md            # Testing Strategy & Coverage
 │
-├── tests/                    # Test Suite
-│   ├── unit/                 # Unit Tests (Backend, Frontend, ML)
+├── tests/                    # Python test suite
+│   ├── unit/                 # Backend and ML unit tests
 │   ├── integration/          # API & Pipeline Integration Tests
 │   ├── e2e/                  # End-to-End User Journey Tests
 │   └── conftest.py           # Pytest Global Fixtures
 │
 ├── data/                     # Local Dataset Storage (Git-ignored)
-├── models/registry/          # Model Artifact Registry (Git-ignored)
+├── models/registry/          # Registry metadata; no trained weights are included
 ├── notebooks/                # Research & Exploration Notebooks
 ├── scripts/                  # Automation & Utility Scripts
 ├── .env.example              # Environment Variable Template
@@ -165,12 +166,13 @@ ai_diagnosis/
 
 ---
 
-## 🔒 Security & Privacy
+## Security & privacy status
 
-- **Data Minimization** — Patient records use cryptographically hashed identifiers.
-- **Role-Based Access** — Strict privilege separation across Clinician, Radiologist, Admin, and Auditor roles.
-- **Audit Trails** — Every diagnostic inference, clinical review, and sensitive action produces an immutable audit record.
-- **Defense in Depth** — Content-Security-Policy headers, rate limiting, magic-byte upload validation, and secure password hashing with bcrypt.
+- Password hashing, JWT authentication, and endpoint role dependencies are present; public registration creates clinician accounts only.
+- The application does not consistently enforce ownership or organization boundaries for patient/case records. Do not use real patient data.
+- There is no audit-events API or demonstrated immutable audit store. The UI no longer displays fabricated events or compliance claims.
+- Upload reads are bounded in the API, but request-body limits and other deployment-level protections still need verification.
+- See [`docs/SECURITY.md`](docs/SECURITY.md) for controls and remaining risks. No compliance certification is claimed.
 
 ---
 

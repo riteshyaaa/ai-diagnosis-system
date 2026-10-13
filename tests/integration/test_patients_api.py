@@ -12,6 +12,10 @@ Tests:
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import UserRole
+from tests.auth_support import login_as_provisioned_role
 
 
 async def get_clinician_token(client: AsyncClient, email: str = "dr.patient.test@hospital.org") -> str:
@@ -22,7 +26,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.patient.test
             "email": email,
             "full_name": "Dr. Patient Tester",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Cardiology",
         },
     )
@@ -33,22 +36,19 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.patient.test
     return login_res.json()["access_token"]
 
 
-async def get_auditor_token(client: AsyncClient, email: str = "auditor.patient@hospital.org") -> str:
-    """Helper to create and authenticate an auditor user."""
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Compliance Auditor",
-            "password": "AuditSecure2026!",
-            "role": "auditor",
-        },
+async def get_auditor_token(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    email: str = "auditor.patient@hospital.org",
+) -> str:
+    """Provision and authenticate an auditor through the test-only database path."""
+    return await login_as_provisioned_role(
+        client,
+        db_session,
+        role=UserRole.AUDITOR,
+        email=email,
+        full_name="Compliance Auditor",
     )
-    login_res = await client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": "AuditSecure2026!"},
-    )
-    return login_res.json()["access_token"]
 
 
 @pytest.mark.asyncio
@@ -185,14 +185,14 @@ async def test_patient_patch_update(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_patient_rbac_enforcement(client: AsyncClient):
+async def test_patient_rbac_enforcement(client: AsyncClient, db_session: AsyncSession):
     """Verify that unauthorized requests and non-clinicians cannot register patients."""
     # 1. No token -> 401
     res_no_auth = await client.post("/api/v1/patients", json={"mrn": "MRN-UNAUTH-01"})
     assert res_no_auth.status_code == 401
 
     # 2. Auditor token cannot create patient (requires clinician or admin) -> 403
-    auditor_token = await get_auditor_token(client, "auditor.rbac@hospital.org")
+    auditor_token = await get_auditor_token(client, db_session, "auditor.rbac@hospital.org")
     auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
     res_forbidden = await client.post(
         "/api/v1/patients",

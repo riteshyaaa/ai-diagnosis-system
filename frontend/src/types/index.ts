@@ -126,7 +126,6 @@ export interface RegisterPayload {
   email: string;
   password: string;
   full_name: string;
-  role?: UserRole;
   department?: string;
 }
 

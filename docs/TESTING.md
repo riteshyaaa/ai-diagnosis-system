@@ -1,38 +1,50 @@
-# MedFusion AI — Testing Strategy
+# Testing and verification
 
-## Test Philosophy
+## Test layout
 
-MedFusion AI maintains high test coverage across all layers to ensure clinical reliability, security, and reproducibility.
+- `tests/unit/` contains backend, image-processing, model, registry, and inference tests.
+- `tests/integration/` contains FastAPI authentication, patient/case, upload, prediction, review, and explanation tests.
+- `tests/e2e/` contains one Python workflow test. It is not a browser-driven Playwright/Cypress suite.
+- No frontend component or browser test files were found. `frontend/package.json` defines Vitest scripts, but a script alone is not a test suite.
 
-## Test Structure
+The repository currently contains no trained checkpoints or real evaluation datasets. Prediction/end-to-end tests assert explicit unavailability rather than substitute random initialized models. Explanation and prediction-dependent review integration tests skip with a reason until all three registered model checkpoint files exist; tests that do not require predictions remain runnable.
 
-```
-tests/
-├── unit/
-│   ├── backend/          # FastAPI routers, services, repositories
-│   ├── ml/               # Data loaders, model forward pass, loss functions
-│   └── frontend/         # Component rendering, custom hooks, utilities
-├── integration/
-│   ├── api/              # Full HTTP request-response flows with test DB
-│   └── ml_pipeline/      # End-to-end training and inference pipeline
-└── e2e/                  # Critical user journeys (login → upload → infer → review)
-```
+## Commands
 
-## Running Tests
+Run from the repository root after installing Python dependencies:
 
-### Backend Tests
 ```bash
-cd backend
-pytest tests/ -v --cov=app --cov-report=term-missing
+pytest -q
 ```
 
-### Frontend Tests
+The pytest configuration points to `tests/` and adds `backend/` to the import path. Test dependencies are declared in the backend development requirements; ML dependencies are declared separately under `ml/requirements.txt`.
+
+For the frontend, from `frontend/`:
+
 ```bash
-cd frontend
-npm run test
+npm ci
+npm run build
+npm run lint
+npm run test -- --run
 ```
 
-### ML Tests
-```bash
-pytest tests/unit/ml/ -v
-```
+The test command is expected to report no tests until frontend test files are added.
+
+## Verification in the audit environment
+
+| Command/check | Result |
+|---|---|
+| `pytest -q` | **Blocked before collection:** `pytest: command not found`. |
+| `cd frontend && npm run build` | **Blocked before type checking:** `tsc: not found`; no `node_modules/` directory. |
+| Python dependency probe | **Blocked:** FastAPI, Pydantic, SQLAlchemy, PyTorch, NumPy, and test dependencies are absent. |
+| Frontend dependency probe | **Blocked:** frontend dependencies are not installed. |
+| BOM-aware Python syntax check | **Passed:** 144 Python source/test files parsed without importing project dependencies. |
+| Registry JSON/safety check | **Passed:** all 6 JSON files parse; the three model entries have no active checkpoint, unsupported metrics, or checksum claim. |
+| Docker Compose config | **Blocked:** repository-root `.env` is absent and referenced by the Compose service configuration. |
+| Docker daemon/build | **Blocked:** Docker CLI cannot connect to `/var/run/docker.sock`; no services were started. |
+
+No tests or builds are claimed to pass in this environment. After setting up dependencies, record complete command output and fix test failures before merging.
+
+## Coverage and CI
+
+No coverage percentage is claimed. No checked-in GitHub Actions workflow was found in the inspected repository. Add CI for backend tests/lint, frontend build/lint/tests, migration checks, and supported Docker builds after the local commands are reproducible.

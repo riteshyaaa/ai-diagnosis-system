@@ -158,7 +158,8 @@ class AuthService:
             email=user_create.email.lower().strip(),
             hashed_password=hashed_pwd,
             full_name=user_create.full_name.strip(),
-            role=user_create.role,
+            # Public registration must never grant a caller-selected privilege.
+            role=UserRole.CLINICIAN,
             department=user_create.department,
             is_active=True,
             is_verified=False,

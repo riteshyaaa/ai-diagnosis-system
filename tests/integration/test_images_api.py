@@ -17,7 +17,10 @@ import numpy as np
 import pytest
 from PIL import Image
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import UserRole
+from tests.auth_support import login_as_provisioned_role
 from tests.unit.test_image_processing import (
     create_synthetic_dicom_bytes,
     create_synthetic_radiograph,
@@ -32,7 +35,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.img.tester@h
             "email": email,
             "full_name": "Dr. Image Tester",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Radiology",
         },
     )
@@ -43,22 +45,19 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.img.tester@h
     return login_res.json()["access_token"]
 
 
-async def get_auditor_token(client: AsyncClient, email: str = "auditor.img@hospital.org") -> str:
-    """Helper to create and authenticate an auditor user."""
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Compliance Auditor",
-            "password": "AuditSecure2026!",
-            "role": "auditor",
-        },
+async def get_auditor_token(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    email: str = "auditor.img@hospital.org",
+) -> str:
+    """Provision and authenticate an auditor through the test-only database path."""
+    return await login_as_provisioned_role(
+        client,
+        db_session,
+        role=UserRole.AUDITOR,
+        email=email,
+        full_name="Compliance Auditor",
     )
-    login_res = await client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": "AuditSecure2026!"},
-    )
-    return login_res.json()["access_token"]
 
 
 async def setup_test_case(client: AsyncClient, headers: dict, mrn: str = "MRN-IMG-001") -> str:
@@ -212,7 +211,7 @@ async def test_image_deletion_in_draft_state(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_image_rbac_enforcement(client: AsyncClient):
+async def test_image_rbac_enforcement(client: AsyncClient, db_session: AsyncSession):
     """Verify auditor role cannot upload images (requires clinician/radiologist)."""
     # 1. Clinician creates case
     doc_token = await get_clinician_token(client, "dr.img.rbac@hospital.org")
@@ -220,7 +219,7 @@ async def test_image_rbac_enforcement(client: AsyncClient):
     case_id = await setup_test_case(client, doc_headers, "MRN-RBAC-IMG")
 
     # 2. Auditor tries to upload image -> 403 Forbidden
-    auditor_token = await get_auditor_token(client, "auditor.img.rbac@hospital.org")
+    auditor_token = await get_auditor_token(client, db_session, "auditor.img.rbac@hospital.org")
     auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
 
     png_bytes = make_png_bytes(256, 256)

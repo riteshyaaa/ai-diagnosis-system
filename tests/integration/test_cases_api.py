@@ -25,7 +25,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.case.tester@
             "email": email,
             "full_name": "Dr. Case Lead",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Pulmonology",
         },
     )

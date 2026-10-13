@@ -29,9 +29,14 @@ class UserBase(BaseModel):
     department: Optional[str] = Field(None, max_length=100)
 
 
-class UserCreate(UserBase):
-    """Payload for creating a new user account."""
+class UserCreate(BaseModel):
+    """Public self-registration payload; roles are assigned by trusted server code."""
+    email: EmailType
+    full_name: str = Field(..., min_length=2, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
+    department: Optional[str] = Field(None, max_length=100)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class UserUpdate(BaseModel):

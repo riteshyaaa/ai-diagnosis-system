@@ -25,7 +25,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.exceptions import NotFoundError, ValidationError
+from app.exceptions import ModelNotFoundError, NotFoundError, ValidationError
 from app.models.audit_log import AuditAction, AuditResourceType
 from app.models.diagnostic_case import CaseModality, CaseStatus, DiagnosticCase
 from app.models.explanation_record import ExplanationRecord, ExplanationType
@@ -121,12 +121,7 @@ class AIInferenceService:
         if not case:
             raise NotFoundError("DiagnosticCase", case_id)
 
-        # 2. Transition case to PROCESSING state if active
-        if case.status in (CaseStatus.DRAFT, CaseStatus.SUBMITTED):
-            case.status = CaseStatus.PROCESSING
-            await self.case_repo.update(case)
-
-        # 3. Resolve Radiograph Image Input
+        # 2. Resolve Radiograph Image Input
         image_path: Optional[Path] = None
         selected_image_id: Optional[UUID] = request_data.selected_image_id
 
@@ -172,8 +167,14 @@ class AIInferenceService:
 
         # 7. Execute Unified Model Inference
         start_time = time.perf_counter()
-        ml_response: MLInferenceResponse = self.inference_engine.predict(ml_request)
+        ml_response = self._predict_or_raise_model_unavailable(ml_request)
         latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
+
+        # Do not transition a case until inference succeeded. Missing weights must
+        # leave the workflow state untouched rather than strand it as PROCESSING.
+        if case.status in (CaseStatus.DRAFT, CaseStatus.SUBMITTED):
+            case.status = CaseStatus.PROCESSING
+            await self.case_repo.update(case)
 
         # 8. Extract Model Type and Primary Condition
         model_type = self._resolve_model_type(ml_response.modality)
@@ -305,7 +306,7 @@ class AIInferenceService:
         )
 
         start_time = time.perf_counter()
-        ml_response: MLInferenceResponse = self.inference_engine.predict(ml_request)
+        ml_response = self._predict_or_raise_model_unavailable(ml_request)
         latency_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
 
         model_type = self._resolve_model_type(ml_response.modality)
@@ -458,6 +459,15 @@ class AIInferenceService:
         return PredictionListResponse(total=len(items), items=items)
 
     # --- Internal Helpers ---
+
+    def _predict_or_raise_model_unavailable(self, request: InferenceRequest) -> MLInferenceResponse:
+        """Translate expected missing-artifact failures into a safe API 503."""
+        try:
+            return self.inference_engine.predict(request)
+        except RuntimeError as exc:
+            if "model not loaded in registry" in str(exc).lower():
+                raise ModelNotFoundError(str(exc)) from exc
+            raise
 
     @staticmethod
     def _extract_tabular_dict(record: Any) -> Dict[str, Any]:
