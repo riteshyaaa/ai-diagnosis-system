@@ -45,7 +45,6 @@ async def test_register_and_login_flow(client: AsyncClient):
         "email": "dr.smith@hospital.org",
         "full_name": "Dr. Sarah Smith",
         "password": "SecurePassword123!",
-        "role": "clinician",
         "department": "Cardiology",
     }
     reg_res = await client.post("/api/v1/auth/register", json=register_payload)
@@ -96,7 +95,6 @@ async def test_duplicate_registration_rejected(client: AsyncClient):
         "email": "unique@hospital.org",
         "full_name": "Unique User",
         "password": "SecurePassword123!",
-        "role": "radiologist",
     }
     res1 = await client.post("/api/v1/auth/register", json=payload)
     assert res1.status_code == 201
@@ -112,7 +110,6 @@ async def test_weak_password_rejected(client: AsyncClient):
         "email": "weak@hospital.org",
         "full_name": "Weak Pwd",
         "password": "short",
-        "role": "clinician",
     }
     res = await client.post("/api/v1/auth/register", json=payload)
     assert res.status_code == 422
@@ -126,7 +123,6 @@ async def test_account_lockout_after_failed_attempts(client: AsyncClient):
         "email": "victim@hospital.org",
         "full_name": "Victim User",
         "password": "CorrectPassword123!",
-        "role": "clinician",
     }
     await client.post("/api/v1/auth/register", json=reg_payload)
 
@@ -145,3 +141,19 @@ async def test_account_lockout_after_failed_attempts(client: AsyncClient):
     good_login = {"email": "victim@hospital.org", "password": "CorrectPassword123!"}
     res_locked = await client.post("/api/v1/auth/login", json=good_login)
     assert res_locked.status_code == 423
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["admin", "auditor", "radiologist"])
+async def test_public_registration_cannot_assign_privileged_role(client: AsyncClient, role: str):
+    """The public registration contract rejects caller-supplied roles."""
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": f"role-{role}@hospital.org",
+            "full_name": "Unprivileged Registration",
+            "password": "SecurePassword123!",
+            "role": role,
+        },
+    )
+    assert response.status_code == 422, response.text

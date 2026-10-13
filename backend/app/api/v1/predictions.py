@@ -32,6 +32,7 @@ from app.security.dependencies import (
     require_clinical_staff,
 )
 from app.services.ai_inference_service import AIInferenceService
+from app.utils.uploads import read_upload_limited
 
 router = APIRouter(tags=["AI Prediction & Inference"])
 
@@ -214,7 +215,7 @@ async def direct_prediction_upload(
     """Run direct inference with multipart radiograph file upload."""
     image_bytes = None
     if file:
-        image_bytes = await file.read()
+        image_bytes = await read_upload_limited(file)
 
     tabular_dict = None
     if tabular_features_json:

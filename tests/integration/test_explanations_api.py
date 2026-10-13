@@ -18,9 +18,18 @@ import json
 import pytest
 from PIL import Image
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import UserRole
+from tests.auth_support import login_as_provisioned_role
+from tests.model_support import has_all_active_model_checkpoints
 from tests.unit.test_image_processing import (
     create_synthetic_radiograph,
+)
+
+pytestmark = pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="explanation integration tests require promoted, present model checkpoints",
 )
 
 
@@ -41,7 +50,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.xai.tester@h
             "email": email,
             "full_name": "Dr. XAI Tester",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Radiology",
         },
     )
@@ -52,22 +60,19 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.xai.tester@h
     return login_res.json()["access_token"]
 
 
-async def get_auditor_token(client: AsyncClient, email: str = "auditor.xai@hospital.org") -> str:
-    """Create and authenticate an auditor user."""
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Audit Officer",
-            "password": "AuditSecure2026!",
-            "role": "auditor",
-        },
+async def get_auditor_token(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    email: str = "auditor.xai@hospital.org",
+) -> str:
+    """Provision and authenticate an auditor through the test-only database path."""
+    return await login_as_provisioned_role(
+        client,
+        db_session,
+        role=UserRole.AUDITOR,
+        email=email,
+        full_name="Audit Officer",
     )
-    login_res = await client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": "AuditSecure2026!"},
-    )
-    return login_res.json()["access_token"]
 
 
 def get_sample_clinical_payload() -> dict:
@@ -322,7 +327,10 @@ async def test_recalculate_pathology_invalid_pathology_fails(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_recalculate_pathology_rbac_enforcement(client: AsyncClient):
+async def test_recalculate_pathology_rbac_enforcement(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
     """Verify that non-clinical roles (auditor) cannot trigger on-demand saliency recalculation."""
     clinician_token = await get_clinician_token(client, "dr.rbac.owner@hospital.org")
     clinician_headers = {"Authorization": f"Bearer {clinician_token}"}
@@ -330,7 +338,11 @@ async def test_recalculate_pathology_rbac_enforcement(client: AsyncClient):
     prediction_id = setup_data["prediction"]["id"]
 
     # Auditor attempting recalculation
-    auditor_token = await get_auditor_token(client, "auditor.rbac.xai@hospital.org")
+    auditor_token = await get_auditor_token(
+        client,
+        db_session,
+        "auditor.rbac.xai@hospital.org",
+    )
     auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
 
     res = await client.post(

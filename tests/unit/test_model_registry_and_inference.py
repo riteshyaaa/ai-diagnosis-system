@@ -148,17 +148,13 @@ def test_registry_tamper_detection(temp_registry_dir):
 
 
 def test_registry_list_models_and_set_active(temp_registry_dir):
-    """Test listing catalog models and updating active deployment versions."""
+    """Test that no baselines are seeded and verified artifacts can be promoted."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     registry.ensure_default_models_registered()
 
-    model_list = registry.list_models()
-    names = [m["model_name"] for m in model_list]
-    assert "chest_xray_vision" in names
-    assert "tabular_risk_mlp" in names
-    assert "multimodal_late_fusion" in names
+    assert registry.list_models() == []
 
-    # Register v2.0.0 and promote
+    # Register a test artifact as staging and promote it only after checksum verification.
     tab_model = TabularRiskMLP(input_dim=13, embedding_dim=128, hidden_dim=128)
     registry.register_model(
         model_name="tabular_risk_mlp",
@@ -173,100 +169,57 @@ def test_registry_list_models_and_set_active(temp_registry_dir):
     assert summary["active_version"] == "2.0.0"
 
 
+def test_load_model_does_not_fall_back_to_latest_experimental_version(temp_registry_dir):
+    """Inference must not silently load the latest unpromoted experiment."""
+    registry = ModelRegistry(registry_dir=temp_registry_dir)
+    model = TabularRiskMLP(input_dim=13, embedding_dim=128, hidden_dim=128)
+    registry.register_model(
+        model_name="tabular_risk_mlp",
+        model_type=ModelType.TABULAR_MLP,
+        model_object=model,
+        version="1.0.0",
+        status=ModelStatus.EXPERIMENTAL,
+    )
+
+    with pytest.raises(RuntimeError, match="no promoted active version"):
+        registry.load_model("tabular_risk_mlp")
+
+
 # =========================================================================
 # Unified Inference Service Tests
 # =========================================================================
 
 
 def test_inference_patient_mrn_privacy_hashing(temp_registry_dir, sample_synthetic_xray_array):
-    """Verify that patient MRN is cryptographically hashed and never returned in plaintext."""
+    """Verify the deterministic privacy hashing helper without claiming model inference."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     service = UnifiedInferenceService(registry=registry, device="cpu")
 
     raw_mrn = "PATIENT-MRN-98765-CONFIDENTIAL"
     expected_hash = hashlib.sha256(raw_mrn.encode("utf-8")).hexdigest()
-
-    req = InferenceRequest(
-        patient_mrn=raw_mrn,
-        image_bytes=cv2.imencode(".png", sample_synthetic_xray_array)[1].tobytes(),
-        generate_explainability=False,
-    )
-    res = service.predict(req)
-
-    assert res.patient_mrn_hash == expected_hash
-    assert raw_mrn not in json.dumps(res.model_dump())
+    assert service.hash_patient_mrn(raw_mrn) == expected_hash
 
 
 def test_image_only_inference_and_gradcam(temp_registry_dir, sample_synthetic_xray_array):
-    """Test unimodal radiograph prediction with 5-pathology findings and Grad-CAM heatmap."""
+    """Image inference fails closed if no trained artifact is registered."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     service = UnifiedInferenceService(registry=registry, device="cpu")
 
     img_bytes = cv2.imencode(".png", sample_synthetic_xray_array)[1].tobytes()
 
-    req = InferenceRequest(
-        image_bytes=img_bytes,
-        generate_explainability=True,
-    )
-    res = service.predict(req)
-
-    assert res.modality == InferenceModality.IMAGE_ONLY
-    assert len(res.pathology_findings) == 5
-    path_names = [f.pathology for f in res.pathology_findings]
-    assert "Atelectasis" in path_names
-    assert "Cardiomegaly" in path_names
-    assert "Effusion" in path_names
-
-    # Check uncertainty
-    assert 0.0 <= res.uncertainty.confidence_score <= 1.0
-    assert res.uncertainty.confidence_band in [
-        ConfidenceBand.HIGH,
-        ConfidenceBand.MODERATE,
-        ConfidenceBand.LOW,
-        ConfidenceBand.ABSTAIN,
-    ]
-
-    # Check Explainability
-    assert res.explainability is not None
-    assert res.explainability.gradcam_heatmap_base64 is not None
-    assert res.explainability.gradcam_overlay_base64 is not None
-    assert res.clinical_risk is None
-
-    # Check Clinical CDSS Regulatory Disclaimer
-    assert "MedFusion AI is an assistive Clinical Decision Support System" in res.clinical_disclaimer
-    assert "does not provide autonomous medical diagnosis" in res.clinical_disclaimer
+    req = InferenceRequest(image_bytes=img_bytes, generate_explainability=True)
+    with pytest.raises(RuntimeError, match="Chest X-Ray vision model not loaded"):
+        service.predict(req)
 
 
 def test_tabular_only_inference_and_shap(temp_registry_dir, sample_valid_tabular_dict):
-    """Test unimodal tabular risk assessment, calibration, and SHAP feature contributions."""
+    """Tabular inference fails closed without trained weights and evaluation provenance."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     service = UnifiedInferenceService(registry=registry, device="cpu")
 
-    req = InferenceRequest(
-        tabular_features=sample_valid_tabular_dict,
-        generate_explainability=True,
-    )
-    res = service.predict(req)
-
-    assert res.modality == InferenceModality.TABULAR_ONLY
-    assert res.clinical_risk is not None
-    assert 0.0 <= res.clinical_risk.raw_probability <= 1.0
-    assert 0.0 <= res.clinical_risk.calibrated_probability <= 1.0
-    assert res.clinical_risk.risk_tier in [
-        RiskTier.LOW,
-        RiskTier.MODERATE,
-        RiskTier.HIGH,
-        RiskTier.CRITICAL,
-    ]
-
-    # SHAP explanations
-    assert res.explainability is not None
-    assert res.explainability.shap_feature_contributions is not None
-    assert len(res.explainability.shap_feature_contributions) > 0
-    top_feat_names = [item["feature"] for item in res.explainability.shap_feature_contributions]
-    assert any(f in top_feat_names for f in ["age", "cholesterol", "resting_bp", "st_depression"])
-
-    assert len(res.pathology_findings) == 0
+    req = InferenceRequest(tabular_features=sample_valid_tabular_dict, generate_explainability=True)
+    with pytest.raises(RuntimeError, match="Tabular risk model not loaded"):
+        service.predict(req)
 
 
 def test_multimodal_late_fusion_inference(
@@ -274,7 +227,7 @@ def test_multimodal_late_fusion_inference(
     sample_synthetic_xray_array,
     sample_valid_tabular_dict,
 ):
-    """Test multimodal prediction combining image and tabular data with gating weights."""
+    """Multimodal inference fails closed without a trained fusion artifact."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     service = UnifiedInferenceService(registry=registry, device="cpu")
 
@@ -285,39 +238,19 @@ def test_multimodal_late_fusion_inference(
         tabular_features=sample_valid_tabular_dict,
         generate_explainability=True,
     )
-    res = service.predict(req)
-
-    assert res.modality == InferenceModality.MULTIMODAL
-    assert len(res.pathology_findings) == 5
-    assert res.clinical_risk is not None
-    assert res.modality_gating is not None
-    assert 0.0 <= res.modality_gating.image_weight <= 1.0
-    assert 0.0 <= res.modality_gating.tabular_weight <= 1.0
-
-    # Explainability contains both Grad-CAM and SHAP
-    assert res.explainability is not None
-    assert res.explainability.gradcam_heatmap_base64 is not None
-    assert res.explainability.shap_feature_contributions is not None
+    with pytest.raises(RuntimeError, match="Multimodal fusion model not loaded"):
+        service.predict(req)
 
 
-def test_clinical_safety_abstention_on_corrupted_image(temp_registry_dir):
-    """Test that all-black/all-white or degraded radiographs trigger quality safety abstention."""
+def test_corrupted_image_is_flagged_by_preprocessing(temp_registry_dir):
+    """Image quality detection is independent of unverified clinical predictions."""
     registry = ModelRegistry(registry_dir=temp_registry_dir)
     service = UnifiedInferenceService(registry=registry, device="cpu")
 
     # Degenerate all-black image
     black_img = np.zeros((224, 224, 3), dtype=np.uint8)
-    black_bytes = cv2.imencode(".png", black_img)[1].tobytes()
-
-    req = InferenceRequest(
-        image_bytes=black_bytes,
-        generate_explainability=False,
-    )
-    res = service.predict(req)
-
-    assert res.uncertainty.abstention_recommended is True
-    assert res.uncertainty.confidence_band == ConfidenceBand.ABSTAIN
-    assert any("Image quality" in reason for reason in res.uncertainty.abstention_reasons)
+    _, _, quality_issues = service._preprocess_image(black_img)
+    assert quality_issues
 
 
 def test_empty_request_raises_validation_error(temp_registry_dir):

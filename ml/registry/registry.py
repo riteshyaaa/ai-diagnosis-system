@@ -6,7 +6,7 @@ Provides:
 - Cryptographic SHA-256 checksum generation and integrity verification
 - Multi-model catalog: Chest X-Ray Vision, Clinical Tabular (MLP & Trees), Multimodal Late Fusion
 - Model status lifecycle (ACTIVE, STAGING, ARCHIVED, EXPERIMENTAL)
-- Safe fallback initialization ensuring seamless service startup even before training runs
+- Explicit registration and promotion; no untrained fallback models are created
 """
 
 import hashlib
@@ -20,13 +20,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 
 from ml.config import MODEL_DIR, PROJECT_ROOT
 from ml.models.fusion.late_fusion import MultimodalLateFusionModel
 from ml.models.image.classifier import ChestXRayClassifier
-from ml.models.tabular.calibration import ProbabilityCalibrator
 from ml.models.tabular.neural_models import TabularRiskMLP
 from ml.models.tabular.tree_models import RandomForestRiskClassifier, XGBoostRiskClassifier
 
@@ -138,7 +136,7 @@ class ModelRegistry:
         metrics: Optional[Dict[str, float]] = None,
         hyperparameters: Optional[Dict[str, Any]] = None,
         description: str = "",
-        status: Union[ModelStatus, str] = ModelStatus.ACTIVE,
+        status: Union[ModelStatus, str] = ModelStatus.EXPERIMENTAL,
         auxiliary_artifacts: Optional[Dict[str, Any]] = None,
     ) -> ModelMetadata:
         """
@@ -239,14 +237,19 @@ class ModelRegistry:
     ) -> Tuple[Any, ModelMetadata, Dict[str, Any]]:
         """
         Load model and auxiliary artifacts from registry.
-        If version is omitted, loads the 'active_version' or 'latest_version'.
+        If version is omitted, loads only the explicitly promoted active version.
         """
         manifest = self._read_manifest()
         if model_name not in manifest["models"]:
             raise KeyError(f"Model '{model_name}' not found in registry.")
 
         model_entry = manifest["models"][model_name]
-        selected_version = version or model_entry.get("active_version") or model_entry.get("latest_version")
+        selected_version = version or model_entry.get("active_version")
+        if version is None and not selected_version:
+            raise RuntimeError(
+                f"Model '{model_name}' has no promoted active version; "
+                "promote a verified artifact before inference."
+            )
         if not selected_version or selected_version not in model_entry["versions"]:
             raise KeyError(f"Version '{selected_version}' for model '{model_name}' not found.")
 
@@ -326,6 +329,18 @@ class ModelRegistry:
         if version not in manifest["models"][model_name]["versions"]:
             raise KeyError(f"Version '{version}' for model '{model_name}' not found.")
 
+        metadata = ModelMetadata.from_dict(manifest["models"][model_name]["versions"][version])
+        artifact_path = self.registry_dir / model_name / f"v{version}" / metadata.artifact_filename
+        if not artifact_path.is_file():
+            raise FileNotFoundError(
+                f"Cannot promote {model_name} v{version}: artifact '{artifact_path}' is missing."
+            )
+        actual_checksum = self.compute_sha256(artifact_path)
+        if not metadata.sha256_checksum or actual_checksum != metadata.sha256_checksum:
+            raise ValueError(
+                f"Cannot promote {model_name} v{version}: artifact checksum is absent or does not match."
+            )
+
         # Update version statuses
         for v_key, v_meta in manifest["models"][model_name]["versions"].items():
             if v_key == version:
@@ -339,67 +354,19 @@ class ModelRegistry:
 
     def ensure_default_models_registered(self) -> None:
         """
-        Verify and initialize default baseline models in registry if not present.
-        Ensures the application operates cleanly in development and testing environments.
+        Check for deployable artifacts without creating untrained baseline models.
+
+        Kept as a compatibility hook for callers that previously relied on the
+        registry to seed random weights. Missing models now remain unavailable.
         """
         manifest = self._read_manifest()
-
-        # 1. Default Vision Classifier (DenseNet-121)
-        if "chest_xray_vision" not in manifest.get("models", {}):
-            vision_model = ChestXRayClassifier(
-                backbone_name="densenet121",
-                num_classes=5,
-                embedding_dim=512,
-                pretrained=False,
-            )
-            self.register_model(
-                model_name="chest_xray_vision",
-                model_type=ModelType.VISION_CLASSIFIER,
-                model_object=vision_model,
-                version="1.0.0",
-                description="DenseNet-121 Chest Radiograph 5-Pathology Multi-Label Classifier",
-                metrics={"macro_auroc": 0.884, "macro_f1": 0.812},
-                hyperparameters={"backbone": "densenet121", "embedding_dim": 512, "num_classes": 5},
-            )
-
-        # 2. Default Tabular Risk Model (TabularRiskMLP)
-        if "tabular_risk_mlp" not in manifest.get("models", {}):
-            tab_model = TabularRiskMLP(
-                input_dim=13,
-                embedding_dim=128,
-                hidden_dim=128,
-            )
-            calibrator = ProbabilityCalibrator(method="isotonic")
-            # Fit calibrator with mock distribution so it is immediately usable
-            dummy_probs = np.linspace(0.05, 0.95, 20)
-            dummy_labels = (dummy_probs >= 0.5).astype(int)
-            calibrator.fit(dummy_probs, dummy_labels)
-
-            self.register_model(
-                model_name="tabular_risk_mlp",
-                model_type=ModelType.TABULAR_MLP,
-                model_object=tab_model,
-                version="1.0.0",
-                description="Deep Tabular Residual MLP for Clinical Cardiovascular Risk Prediction",
-                metrics={"auroc": 0.892, "brier_score": 0.084, "ece": 0.026},
-                hyperparameters={"input_dim": 13, "embedding_dim": 128, "hidden_dim": 128},
-                auxiliary_artifacts={"calibrator": calibrator},
-            )
-
-        # 3. Default Multimodal Late Fusion Model
-        if "multimodal_late_fusion" not in manifest.get("models", {}):
-            fusion_model = MultimodalLateFusionModel(
-                image_embedding_dim=512,
-                tabular_embedding_dim=128,
-                fusion_dim=256,
-                fusion_strategy="gated",
-            )
-            self.register_model(
-                model_name="multimodal_late_fusion",
-                model_type=ModelType.MULTIMODAL_FUSION,
-                model_object=fusion_model,
-                version="1.0.0",
-                description="Gated Multimodal Fusion combining Chest Radiographs and EHR Tabular Data",
-                metrics={"combined_auroc": 0.915, "pathology_macro_auroc": 0.902, "risk_auroc": 0.928},
-                hyperparameters={"fusion_strategy": "gated", "fusion_dim": 256},
+        active_versions = [
+            f"{name}@{entry['active_version']}"
+            for name, entry in manifest.get("models", {}).items()
+            if entry.get("active_version")
+        ]
+        if not active_versions:
+            logger.warning(
+                "No active model artifacts are registered; inference will remain unavailable "
+                "until a verified model is explicitly promoted."
             )

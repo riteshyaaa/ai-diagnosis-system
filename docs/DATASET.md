@@ -1,6 +1,8 @@
 # MedFusion AI — Datasets Documentation
 
-## Supported Datasets
+> **Availability warning:** Dataset names and schemas below describe sources referenced by the code/documentation. Dataset payloads, licenses/permissions, acquisition records, split manifests, and trained model provenance were not found in the repository. Do not treat these as datasets already available or validated for training.
+
+## Referenced datasets (not included)
 
 ### 1. NIH ChestX-ray14 (Imaging Modality)
 

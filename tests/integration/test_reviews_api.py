@@ -16,7 +16,11 @@ import io
 import pytest
 from PIL import Image
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import UserRole
+from tests.auth_support import login_as_provisioned_role
+from tests.model_support import has_all_active_model_checkpoints
 from tests.unit.test_image_processing import create_synthetic_radiograph
 
 
@@ -37,7 +41,6 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.review.teste
             "email": email,
             "full_name": "Dr. Clinical Reviewer",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Cardiology",
         },
     )
@@ -48,22 +51,19 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.review.teste
     return login_res.json()["access_token"]
 
 
-async def get_auditor_token(client: AsyncClient, email: str = "auditor.review@hospital.org") -> str:
-    """Create and authenticate an auditor user."""
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Compliance Auditor",
-            "password": "AuditSecure2026!",
-            "role": "auditor",
-        },
+async def get_auditor_token(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    email: str = "auditor.review@hospital.org",
+) -> str:
+    """Provision and authenticate an auditor through the test-only database path."""
+    return await login_as_provisioned_role(
+        client,
+        db_session,
+        role=UserRole.AUDITOR,
+        email=email,
+        full_name="Compliance Auditor",
     )
-    login_res = await client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": "AuditSecure2026!"},
-    )
-    return login_res.json()["access_token"]
 
 
 def get_sample_clinical_payload() -> dict:
@@ -132,6 +132,10 @@ async def setup_case_with_prediction(client: AsyncClient, headers: dict, mrn: st
     return {"case_id": case_id, "prediction": pred_res.json()}
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review workflow test requires model-backed prediction artifacts",
+)
 @pytest.mark.asyncio
 async def test_submit_accept_review_workflow(client: AsyncClient):
     """
@@ -174,6 +178,10 @@ async def test_submit_accept_review_workflow(client: AsyncClient):
     assert case_res.json()["status"] == "reviewed"
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review workflow test requires model-backed prediction artifacts",
+)
 @pytest.mark.asyncio
 async def test_submit_modify_review_workflow(client: AsyncClient):
     """
@@ -212,6 +220,10 @@ async def test_submit_modify_review_workflow(client: AsyncClient):
     assert case_res.json()["status"] == "reviewed"
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review workflow test requires model-backed prediction artifacts",
+)
 @pytest.mark.asyncio
 async def test_modify_decision_without_modified_diagnosis_fails(client: AsyncClient):
     """Test that selecting MODIFY without providing a modified_diagnosis fails with 422."""
@@ -231,6 +243,10 @@ async def test_modify_decision_without_modified_diagnosis_fails(client: AsyncCli
     assert res.status_code == 422
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review workflow test requires model-backed prediction artifacts",
+)
 @pytest.mark.asyncio
 async def test_submit_reject_review_workflow(client: AsyncClient):
     """Test submitting a REJECT review with clinical reasoning."""
@@ -277,6 +293,10 @@ async def test_review_on_case_without_predictions_fails(client: AsyncClient):
     assert "no AI predictions" in res.json()["detail"]
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review workflow test requires model-backed prediction artifacts",
+)
 @pytest.mark.asyncio
 async def test_get_case_reviews_and_prediction_reviews(client: AsyncClient):
     """Test retrieving reviews filtered by case and prediction."""
@@ -317,6 +337,10 @@ async def test_get_case_reviews_and_prediction_reviews(client: AsyncClient):
     assert single_rev.json()["id"] == review_id
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review analytics test requires model-backed review records",
+)
 @pytest.mark.asyncio
 async def test_get_review_statistics_and_concordance_analytics(client: AsyncClient):
     """Test aggregate concordance statistics across multiple reviews."""
@@ -357,8 +381,15 @@ async def test_get_review_statistics_and_concordance_analytics(client: AsyncClie
     assert "assistive Clinical Decision Support System" in stats["clinical_disclaimer"]
 
 
+@pytest.mark.skipif(
+    not has_all_active_model_checkpoints(),
+    reason="review RBAC test requires a model-backed prediction to target",
+)
 @pytest.mark.asyncio
-async def test_submit_review_rbac_enforcement(client: AsyncClient):
+async def test_submit_review_rbac_enforcement(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
     """Verify that non-clinical roles (e.g. auditor) cannot submit clinical reviews."""
     clinician_token = await get_clinician_token(client, "dr.rbac.owner2@hospital.org")
     clinician_headers = {"Authorization": f"Bearer {clinician_token}"}
@@ -366,7 +397,11 @@ async def test_submit_review_rbac_enforcement(client: AsyncClient):
     case_id = setup_data["case_id"]
 
     # Auditor attempting review submission
-    auditor_token = await get_auditor_token(client, "auditor.rbac.rev@hospital.org")
+    auditor_token = await get_auditor_token(
+        client,
+        db_session,
+        "auditor.rbac.rev@hospital.org",
+    )
     auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
 
     res = await client.post(

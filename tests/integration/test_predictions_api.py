@@ -22,7 +22,10 @@ import numpy as np
 import pytest
 from PIL import Image
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import User, UserRole
+from app.security.password import hash_password
 from tests.unit.test_image_processing import (
     create_synthetic_dicom_bytes,
     create_synthetic_radiograph,
@@ -46,31 +49,12 @@ async def get_clinician_token(client: AsyncClient, email: str = "dr.predict.test
             "email": email,
             "full_name": "Dr. Prediction Tester",
             "password": "DocSecure2026!",
-            "role": "clinician",
             "department": "Cardiology",
         },
     )
     login_res = await client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": "DocSecure2026!"},
-    )
-    return login_res.json()["access_token"]
-
-
-async def get_auditor_token(client: AsyncClient, email: str = "auditor.pred@hospital.org") -> str:
-    """Create and authenticate an auditor user."""
-    await client.post(
-        "/api/v1/auth/register",
-        json={
-            "email": email,
-            "full_name": "Compliance Auditor",
-            "password": "AuditSecure2026!",
-            "role": "auditor",
-        },
-    )
-    login_res = await client.post(
-        "/api/v1/auth/login",
-        json={"email": email, "password": "AuditSecure2026!"},
     )
     return login_res.json()["access_token"]
 
@@ -147,67 +131,20 @@ async def test_multimodal_case_prediction_flow(client: AsyncClient):
 
     case_id = await setup_multimodal_case(client, headers, mrn="MRN-MULTI-001")
 
-    # Execute Prediction
+    # The checked-in model metadata has no checkpoint. Inference must not
+    # persist a prediction produced by random weights.
     predict_res = await client.post(
         f"/api/v1/cases/{case_id}/predict",
         json={"generate_explainability": True},
         headers=headers,
     )
-    assert predict_res.status_code == 201
-    pred = predict_res.json()
+    assert predict_res.status_code == 503
+    assert "model not found" in predict_res.json()["detail"].lower()
 
-    # Verify Core Prediction Metadata
-    assert pred["id"] is not None
-    assert pred["case_id"] == case_id
-    assert pred["model_type"] == "multimodal_fusion"
-    assert pred["model_version"] == "1.0.0"
-    assert pred["inference_latency_ms"] > 0
-    assert 0.0 <= pred["raw_probability"] <= 1.0
-    assert 0.0 <= pred["calibrated_probability"] <= 1.0
-
-    # Verify Pathology Findings (5-label multi-label chest X-ray)
-    assert len(pred["pathology_findings"]) == 5
-    pathologies = {f["pathology"]: f for f in pred["pathology_findings"]}
-    assert "Atelectasis" in pathologies
-    assert "Cardiomegaly" in pathologies
-    assert "Effusion" in pathologies
-    assert "Infiltration" in pathologies
-    assert "Mass" in pathologies
-
-    # Verify Tabular Cardiovascular Risk
-    assert pred["clinical_risk"] is not None
-    assert 0.0 <= pred["clinical_risk"]["calibrated_probability"] <= 1.0
-    assert pred["clinical_risk"]["risk_tier"] in ["low", "moderate", "high", "critical"]
-
-    # Verify Modality Gating Weights
-    assert pred["modality_gating"] is not None
-    assert 0.0 <= pred["modality_gating"]["image_weight"] <= 1.0
-    assert 0.0 <= pred["modality_gating"]["tabular_weight"] <= 1.0
-    dom = pred["modality_gating"]["dominant_modality"].lower()
-    assert any(w in dom for w in ["radiograph", "visual", "image", "clinical", "tabular", "ehr", "balanced"])
-
-    # Verify Uncertainty Metrics
-    assert pred["uncertainty"] is not None
-    assert 0.0 <= pred["uncertainty"]["confidence_score"] <= 1.0
-    assert pred["uncertainty"]["confidence_band"] in ["high", "moderate", "low", "abstain"]
-
-    # Verify Explainability Artifacts (Grad-CAM + SHAP)
-    assert pred["explanation"] is not None
-    assert pred["explanation"]["explanation_type"] == "multimodal_attribution"
-    assert pred["explanation"]["overlay_base64"] is not None
-    assert pred["explanation"]["heatmap_path"] is not None
-    assert pred["explanation"]["shap_values"] is not None
-    assert len(pred["explanation"]["top_features"]) > 0
-    assert "MultimodalLateFusion evaluated" in pred["explanation"]["summary_text"]
-
-    # Verify Mandatory Clinical CDSS Regulatory Disclaimer
-    assert "MedFusion AI is an assistive Clinical Decision Support System" in pred["clinical_disclaimer"]
-    assert "does not provide autonomous medical diagnosis" in pred["clinical_disclaimer"]
-
-    # Verify Case Status transitioned to COMPLETED
+    # An unavailable model must not complete or strand the case.
     case_res = await client.get(f"/api/v1/cases/{case_id}", headers=headers)
     assert case_res.status_code == 200
-    assert case_res.json()["status"] == "completed"
+    assert case_res.json()["status"] == "draft"
 
 
 @pytest.mark.asyncio
@@ -230,17 +167,10 @@ async def test_image_only_case_prediction(client: AsyncClient):
     files = {"file": ("radiograph.png", png_bytes, "image/png")}
     await client.post(f"/api/v1/cases/{case_id}/images", files=files, headers=headers)
 
-    # Predict
+    # No verified vision weights are available.
     predict_res = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
-    assert predict_res.status_code == 201
-    pred = predict_res.json()
-
-    assert pred["model_type"] == "vision_classifier"
-    assert len(pred["pathology_findings"]) == 5
-    assert pred["clinical_risk"] is None
-    assert pred["modality_gating"] is None
-    assert pred["explanation"]["explanation_type"] == "gradcam_saliency"
-    assert pred["explanation"]["overlay_base64"] is not None
+    assert predict_res.status_code == 503
+    assert "model not found" in predict_res.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -261,16 +191,10 @@ async def test_tabular_only_case_prediction(client: AsyncClient):
     # Add clinical telemetry
     await client.post(f"/api/v1/cases/{case_id}/clinical-records", json=get_sample_tabular_payload(), headers=headers)
 
-    # Predict
+    # No verified tabular weights are available.
     predict_res = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
-    assert predict_res.status_code == 201
-    pred = predict_res.json()
-
-    assert pred["model_type"] == "tabular_mlp"
-    assert len(pred["pathology_findings"]) == 0
-    assert pred["clinical_risk"] is not None
-    assert pred["explanation"]["explanation_type"] == "shap_feature_importance"
-    assert pred["explanation"]["shap_values"] is not None
+    assert predict_res.status_code == 503
+    assert "model not found" in predict_res.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -300,14 +224,8 @@ async def test_direct_realtime_prediction_json(client: AsyncClient):
     }
 
     res = await client.post("/api/v1/predictions/direct", json=payload, headers=headers)
-    assert res.status_code == 200
-    pred = res.json()
-
-    assert pred["case_id"] is None
-    assert pred["model_type"] == "tabular_mlp"
-    assert pred["clinical_risk"] is not None
-    assert pred["uncertainty"] is not None
-    assert "assistive Clinical Decision Support System" in pred["clinical_disclaimer"]
+    assert res.status_code == 503
+    assert "model not found" in res.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -339,70 +257,44 @@ async def test_direct_realtime_prediction_upload(client: AsyncClient):
     }
 
     res = await client.post("/api/v1/predictions/direct-upload", files=files, data=data, headers=headers)
-    assert res.status_code == 200
-    pred = res.json()
-
-    assert pred["case_id"] is None
-    assert pred["model_type"] == "multimodal_fusion"
-    assert len(pred["pathology_findings"]) == 5
-    assert pred["clinical_risk"] is not None
-    assert pred["modality_gating"] is not None
-    assert pred["explanation"]["overlay_base64"] is not None
+    assert res.status_code == 503
+    assert "model not found" in res.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
 async def test_get_predictions_by_case_and_id(client: AsyncClient):
-    """Test retrieving predictions by case ID, latest prediction, and specific prediction UUID."""
+    """A missing checkpoint must not create prediction rows."""
     token = await get_clinician_token(client, "dr.retrieve.pred@hospital.org")
     headers = {"Authorization": f"Bearer {token}"}
 
     case_id = await setup_multimodal_case(client, headers, mrn="MRN-RETRIEVE-001")
 
-    # Run inference twice to create history
-    res1 = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
-    assert res1.status_code == 201
-    pred1_id = res1.json()["id"]
+    failed = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
+    assert failed.status_code == 503
 
-    res2 = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
-    assert res2.status_code == 201
-    pred2_id = res2.json()["id"]
-
-    # 1. Get all predictions for case
     list_res = await client.get(f"/api/v1/cases/{case_id}/predictions", headers=headers)
     assert list_res.status_code == 200
-    case_preds = list_res.json()
-    assert case_preds["total"] >= 2
-    pred_ids = [p["id"] for p in case_preds["items"]]
-    assert pred1_id in pred_ids
-    assert pred2_id in pred_ids
-
-    # 2. Get latest prediction for case
-    latest_res = await client.get(f"/api/v1/cases/{case_id}/predictions/latest", headers=headers)
-    assert latest_res.status_code == 200
-    assert latest_res.json()["id"] == pred2_id
-
-    # 3. Get specific prediction by ID
-    single_res = await client.get(f"/api/v1/predictions/{pred1_id}", headers=headers)
-    assert single_res.status_code == 200
-    assert single_res.json()["id"] == pred1_id
+    assert list_res.json()["total"] == 0
+    assert list_res.json()["items"] == []
 
 
 @pytest.mark.asyncio
 async def test_list_all_predictions_with_filtering(client: AsyncClient):
-    """Test querying and paginating all predictions with status filtering."""
+    """A rejected inference does not create a global prediction row."""
     token = await get_clinician_token(client, "dr.listall.pred@hospital.org")
     headers = {"Authorization": f"Bearer {token}"}
 
     case_id = await setup_multimodal_case(client, headers, mrn="MRN-LISTALL-001")
-    await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
+    failed = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=headers)
+    assert failed.status_code == 503
 
     res = await client.get("/api/v1/predictions?status=confident&limit=10", headers=headers)
     assert res.status_code == 200
     data = res.json()
     assert "total" in data
     assert isinstance(data["items"], list)
-    for p in data["items"]:
-        assert p["status"] == "confident"
+    assert data["total"] == 0
+    assert data["items"] == []
 
 
 @pytest.mark.asyncio
@@ -425,14 +317,32 @@ async def test_prediction_on_empty_case_fails(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_prediction_rbac_enforcement(client: AsyncClient):
+async def test_prediction_rbac_enforcement(client: AsyncClient, db_session: AsyncSession):
     """Verify that non-clinical roles (e.g. auditor) cannot execute AI inference."""
     clinician_token = await get_clinician_token(client, "dr.rbac.pred@hospital.org")
     clinician_headers = {"Authorization": f"Bearer {clinician_token}"}
     case_id = await setup_multimodal_case(client, clinician_headers, mrn="MRN-RBAC-001")
 
-    # Auditor attempting prediction
-    auditor_token = await get_auditor_token(client, "auditor.rbac.pred@hospital.org")
+    # Create the privileged test role directly; public self-registration may
+    # only create clinicians.
+    auditor_email = "auditor.rbac.pred@hospital.org"
+    db_session.add(
+        User(
+            email=auditor_email,
+            full_name="Compliance Auditor",
+            hashed_password=hash_password("AuditSecure2026!"),
+            role=UserRole.AUDITOR,
+            is_active=True,
+            is_verified=True,
+        )
+    )
+    await db_session.commit()
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": auditor_email, "password": "AuditSecure2026!"},
+    )
+    assert login.status_code == 200, login.text
+    auditor_token = login.json()["access_token"]
     auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
 
     res = await client.post(f"/api/v1/cases/{case_id}/predict", json={}, headers=auditor_headers)

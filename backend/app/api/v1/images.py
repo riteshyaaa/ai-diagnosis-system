@@ -30,6 +30,7 @@ from app.security.dependencies import (
     require_clinician,
 )
 from app.services.image_record_service import ImageRecordService
+from app.utils.uploads import read_upload_limited
 
 router = APIRouter(tags=["Medical Imaging"])
 
@@ -53,7 +54,7 @@ async def upload_case_image(
     if not file.filename:
         raise FileValidationError("Upload filename cannot be empty.")
 
-    content = await file.read()
+    content = await read_upload_limited(file)
     service = ImageRecordService(session)
     ip_addr = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
