@@ -9,7 +9,7 @@
 **MedFusion AI** is a software prototype with a React/TypeScript frontend, FastAPI backend, PostgreSQL data model, and experimental ML code for chest-radiograph, tabular, and multimodal workflows. The repository includes:
 
 - API, persistence, and UI code for authentication, owner-scoped patient/case records, uploads, clinical records, predictions, and reviews; backend API tests cover selected workflows, but no browser-driven end-to-end suite exists.
-- An owner-scoped JSON report preview generated from saved case inputs, model output, and reviews. It remains a draft or pending-review preview; PDF generation, signature, and controlled delivery are not implemented.
+- An owner-scoped JSON report preview and downloadable PDF report summary generated from saved case inputs, model output, and reviews. It remains a draft or pending-review preview; digital signature and controlled clinical delivery are not implemented.
 - Model architectures, synthetic-data experiments, preprocessing, training, and evaluation code; these are research components, not evidence of model performance.
 - A fail-closed model registry: absent or unverified weights do not produce predictions.
 - A security/audit status overview in [`docs/IMPLEMENTATION_AUDIT.md`](docs/IMPLEMENTATION_AUDIT.md).
@@ -64,7 +64,7 @@ docker compose --env-file .env -f docker/docker-compose.yml up --build -d
 
 ### Option 2: Local Development (Windows PowerShell)
 
-Use a separate development database. Do not point setup or tests at a database containing records you need to keep.
+Use a separate development database or run `.\scripts\setup_local_windows.ps1` to configure `.venv`, dependencies, and the local SQLite database automatically. Do not point setup or tests at a database containing records you need to keep.
 
 ```powershell
 # Backend: from the repository root

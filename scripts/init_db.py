@@ -42,7 +42,7 @@ async def init_db() -> None:
     print("\n1. Creating database tables if not present...")
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    print("   ✓ Schema tables verified and ready.")
+    print("   [OK] Schema tables verified and ready.")
 
     print("\n2. Seeding default role accounts...")
     async with AsyncSessionLocal() as session:
@@ -104,7 +104,7 @@ async def init_db() -> None:
                 )
                 created = await user_repo.create(user)
                 created_users.append(created)
-                print(f"   ✓ Created user: {u_data['email']} [{u_data['role'].value}]")
+                print(f"   [OK] Created user: {u_data['email']} [{u_data['role'].value}]")
 
                 # Log audit event
                 await audit_repo.log_event(
@@ -120,7 +120,7 @@ async def init_db() -> None:
                 existing.is_active = True
                 existing.is_verified = True
                 await session.flush()
-                print(f"   ✓ Updated password for user: {u_data['email']}")
+                print(f"   [OK] Updated password for user: {u_data['email']}")
 
         print("\n3. Seeding reference de-identified patient record...")
         sample_mrn = "MRN-2026-00101"
@@ -136,7 +136,7 @@ async def init_db() -> None:
                 medical_history_summary="History of hypertension, hyperlipidemia, non-smoker.",
             )
             created_patient = await patient_repo.create(patient)
-            print(f"   ✓ Created reference patient with SHA-256 MRN hash: {sample_mrn_hash[:12]}...")
+            print(f"   [OK] Created reference patient with SHA-256 MRN hash: {sample_mrn_hash[:12]}...")
 
             await audit_repo.log_event(
                 action=AuditAction.PATIENT_CREATE,
@@ -145,7 +145,7 @@ async def init_db() -> None:
                 details={"age": 58, "sex": "male", "seeded": True},
             )
         else:
-            print(f"   • Reference patient already exists: {sample_mrn_hash[:12]}...")
+            print(f"   * Reference patient already exists: {sample_mrn_hash[:12]}...")
 
         await session.commit()
 
@@ -153,5 +153,18 @@ async def init_db() -> None:
     print("=" * 60)
 
 
+def stamp_head() -> None:
+    try:
+        from alembic import command
+        from alembic.config import Config
+        alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+        alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+        command.stamp(alembic_cfg, "head")
+        print("   [OK] Alembic migration head stamped.")
+    except Exception as exc:
+        print(f"   ! Alembic stamp warning: {exc}")
+
+
 if __name__ == "__main__":
     asyncio.run(init_db())
+    stamp_head()

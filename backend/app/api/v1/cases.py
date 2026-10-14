@@ -13,7 +13,7 @@ Exposes routes for:
 
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -170,6 +170,35 @@ async def get_case_report_preview(
         viewer_id=current_user.id,
         ip_address=ip_addr,
         user_agent=user_agent,
+    )
+
+
+@router.get(
+    "/{case_id}/report-pdf",
+    status_code=status.HTTP_200_OK,
+    summary="Download Case Report as PDF",
+    description="Generate and download an owner-scoped PDF summary of the persisted case, prediction, and review.",
+)
+async def get_case_report_pdf(
+    case_id: UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> Response:
+    """Generate and return a PDF report artifact for the authorized case owner."""
+    service = CaseReportService(session)
+    ip_addr = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    pdf_bytes = await service.generate_pdf(
+        case_id=case_id,
+        viewer_id=current_user.id,
+        ip_address=ip_addr,
+        user_agent=user_agent,
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="medfusion_case_{case_id}.pdf"'},
     )
 
 

@@ -1,6 +1,7 @@
-import React from "react";
-import { FileText, X } from "lucide-react";
+import React, { useState } from "react";
+import { Download, FileText, X } from "lucide-react";
 import type { CaseReportPreview } from "../../types";
+import { caseService } from "../../services/cases.service";
 
 interface CaseReportPreviewPanelProps {
   report: CaseReportPreview;
@@ -10,7 +11,31 @@ interface CaseReportPreviewPanelProps {
 export const CaseReportPreviewPanel: React.FC<CaseReportPreviewPanelProps> = ({
   report,
   onClose,
-}) => (
+}) => {
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    setDownloadError(null);
+    try {
+      const blob = await caseService.downloadReportPdf(report.case_id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `medfusion_case_${report.case_reference || report.case_id}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setDownloadError("Failed to export PDF report artifact.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  return (
   <section
     aria-labelledby="report-preview-title"
     className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm"
@@ -30,15 +55,32 @@ export const CaseReportPreviewPanel: React.FC<CaseReportPreviewPanelProps> = ({
           {report.case_reference} · Generated {new Date(report.generated_at).toLocaleString()}
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close report preview"
-        className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-      >
-        <X className="h-4 w-4" aria-hidden="true" />
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleDownloadPdf}
+          disabled={isDownloading}
+          aria-label="Export PDF report"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-50"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          {isDownloading ? "Exporting..." : "Export PDF"}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close report preview"
+          className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
     </header>
+    {downloadError && (
+      <p role="alert" className="mt-2 text-xs font-medium text-rose-600">
+        {downloadError}
+      </p>
+    )}
 
     <div className="mt-4 grid gap-4 md:grid-cols-2">
       <div className="rounded-xl bg-gray-50 p-4">
@@ -108,4 +150,5 @@ export const CaseReportPreviewPanel: React.FC<CaseReportPreviewPanelProps> = ({
       {report.disclaimer}
     </p>
   </section>
-);
+  );
+};

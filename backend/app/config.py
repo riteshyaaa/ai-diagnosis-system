@@ -29,7 +29,18 @@ class Settings(BaseSettings):
 
     def __init__(self, **values: Any) -> None:
         super().__init__(**values)
+        self._normalize_local_paths()
         self._validate_production_configuration()
+
+    def _normalize_local_paths(self) -> None:
+        """Resolve docker container paths like /app/uploads to local workspace when outside docker."""
+        import os
+        if os.name == "nt" or not (Path("/app").exists() and not Path("/app").drive):
+            for field_name in ("upload_dir", "storage_dir", "model_dir"):
+                val = getattr(self, field_name, None)
+                if val and str(val).replace("\\", "/").startswith("/app/"):
+                    sub = str(val).replace("\\", "/").split("/app/", 1)[-1]
+                    setattr(self, field_name, str((PROJECT_ROOT / sub).resolve()))
 
     def _validate_production_configuration(self) -> None:
         """Reject development defaults when the app is explicitly in production."""
@@ -160,7 +171,12 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""
-        return [origin.strip() for origin in self.cors_origins.split(",")]
+        origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        if self.app_env.strip().lower() not in {"prod", "production"}:
+            for dev_origin in ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]:
+                if dev_origin not in origins:
+                    origins.append(dev_origin)
+        return origins
 
     # --- File Storage ---
     upload_dir: str = "./uploads"

@@ -229,3 +229,227 @@ class CaseReportService:
             rationale=review.clinical_notes,
             reviewed_at=review.reviewed_at,
         )
+
+    async def generate_pdf(
+        self,
+        case_id: UUID,
+        viewer_id: UUID,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> bytes:
+        """Generate an owner-scoped PDF diagnostic report summary."""
+        import io
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+        preview = await self.get_preview(
+            case_id=case_id,
+            viewer_id=viewer_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=36,
+            bottomMargin=36,
+        )
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'DocTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            leading=20,
+            textColor=colors.HexColor('#1e3a8a'),
+            spaceAfter=4,
+        )
+        subtitle_style = ParagraphStyle(
+            'DocSubtitle',
+            parent=styles['Normal'],
+            fontSize=8,
+            leading=11,
+            textColor=colors.HexColor('#475569'),
+            spaceAfter=8,
+        )
+        section_heading = ParagraphStyle(
+            'SectionHeading',
+            parent=styles['Heading2'],
+            fontSize=11,
+            leading=14,
+            textColor=colors.HexColor('#0f172a'),
+            spaceBefore=8,
+            spaceAfter=4,
+        )
+        disclaimer_style = ParagraphStyle(
+            'Disclaimer',
+            parent=styles['Normal'],
+            fontSize=7.5,
+            leading=10,
+            textColor=colors.HexColor('#92400e'),
+            backColor=colors.HexColor('#fef3c7'),
+            borderPadding=4,
+            spaceBefore=6,
+            spaceAfter=6,
+        )
+        body_style = ParagraphStyle(
+            'Body',
+            parent=styles['Normal'],
+            fontSize=8.5,
+            leading=11,
+            textColor=colors.HexColor('#334155'),
+        )
+
+        story = []
+
+        # Title
+        story.append(Paragraph("MedFusion AI — Diagnostic Case Summary", title_style))
+        gen_time = preview.generated_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        story.append(Paragraph(f"Case Reference: {preview.case_reference} &nbsp;|&nbsp; Status: {preview.status.value.upper()} &nbsp;|&nbsp; Generated: {gen_time}", subtitle_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cbd5e1'), spaceAfter=6))
+
+        # Disclaimer
+        story.append(Paragraph(f"<b>RESEARCH PROTOTYPE NOTICE:</b> {preview.disclaimer}", disclaimer_style))
+
+        # Patient Profile
+        story.append(Paragraph("Patient & Case Profile", section_heading))
+        patient_data = [
+            [
+                Paragraph("<b>Case Reference:</b>", body_style),
+                Paragraph(str(preview.case_reference), body_style),
+                Paragraph("<b>Input Modality:</b>", body_style),
+                Paragraph(str(preview.modality.value), body_style),
+            ],
+            [
+                Paragraph("<b>Patient Age:</b>", body_style),
+                Paragraph(str(preview.patient.age or "N/A"), body_style),
+                Paragraph("<b>Biological Sex:</b>", body_style),
+                Paragraph(str(preview.patient.sex), body_style),
+            ],
+        ]
+        t_patient = Table(patient_data, colWidths=[110, 160, 110, 160])
+        t_patient.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t_patient)
+
+        # Inputs
+        story.append(Paragraph("Persisted Input Records", section_heading))
+        input_rows = []
+        if preview.image_input:
+            input_rows.append([
+                Paragraph("<b>Radiograph:</b>", body_style),
+                Paragraph(f"{preview.image_input.image_type.value} ({preview.image_input.width}x{preview.image_input.height} px)<br/>SHA-256: <font size=6>{preview.image_input.sha256}</font>", body_style),
+            ])
+        if preview.clinical_input:
+            ci = preview.clinical_input
+            details_str = f"BP: {ci.resting_bp_mm_hg} mmHg, Chol: {ci.cholesterol_mg_dl} mg/dL, Max HR: {ci.max_hr_bpm} bpm, Chest Pain Type: {ci.chest_pain_type}, ST Dep: {ci.st_depression_mm}"
+            input_rows.append([
+                Paragraph("<b>Clinical Telemetry:</b>", body_style),
+                Paragraph(details_str, body_style),
+            ])
+        if not input_rows:
+            input_rows.append([Paragraph("<b>Inputs:</b>", body_style), Paragraph("No supported input records linked.", body_style)])
+
+        t_inputs = Table(input_rows, colWidths=[110, 430])
+        t_inputs.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
+            ('PADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t_inputs)
+
+        # AI Prediction
+        story.append(Paragraph("AI Diagnostic Inference", section_heading))
+        if preview.prediction:
+            pred = preview.prediction
+            freshness = "CURRENT" if pred.input_version_current else "STALE (Historical inputs)"
+            pred_rows = [
+                [
+                    Paragraph("<b>Model / Version:</b>", body_style),
+                    Paragraph(f"{pred.model_type} (v{pred.model_version})", body_style),
+                    Paragraph("<b>Input Consistency:</b>", body_style),
+                    Paragraph(freshness, body_style),
+                ],
+                [
+                    Paragraph("<b>Primary Finding:</b>", body_style),
+                    Paragraph(f"<b>{pred.model_reported_finding}</b>", body_style),
+                    Paragraph("<b>Confidence Band:</b>", body_style),
+                    Paragraph(str(pred.confidence_band.value if hasattr(pred.confidence_band, 'value') else pred.confidence_band), body_style),
+                ],
+                [
+                    Paragraph("<b>Stored Score:</b>", body_style),
+                    Paragraph(f"{pred.raw_score:.3f} (calibrated: {pred.stored_probability:.3f})", body_style),
+                    Paragraph("<b>Inference Status:</b>", body_style),
+                    Paragraph(str(pred.status.value if hasattr(pred.status, 'value') else pred.status), body_style),
+                ],
+            ]
+            t_pred = Table(pred_rows, colWidths=[110, 160, 110, 160])
+            t_pred.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#eff6ff')),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bfdbfe')),
+                ('PADDING', (0,0), (-1,-1), 4),
+            ]))
+            story.append(t_pred)
+            story.append(Paragraph(f"<i>Notice:</i> {preview.probability_notice}", subtitle_style))
+        else:
+            story.append(Paragraph("No AI prediction recorded or verified model artifact was unavailable at inference time.", body_style))
+
+        # Clinician Review
+        story.append(Paragraph("Clinician-in-the-Loop Review", section_heading))
+        if preview.review:
+            rev = preview.review
+            rev_time = rev.reviewed_at.strftime("%Y-%m-%d %H:%M:%S UTC") if rev.reviewed_at else "N/A"
+            rev_rows = [
+                [
+                    Paragraph("<b>Reviewer Verdict:</b>", body_style),
+                    Paragraph(f"<b>{rev.decision.value.upper()}</b>", body_style),
+                    Paragraph("<b>Review Timestamp:</b>", body_style),
+                    Paragraph(rev_time, body_style),
+                ],
+            ]
+            if rev.modified_diagnosis:
+                rev_rows.append([
+                    Paragraph("<b>Modified Diagnosis:</b>", body_style),
+                    Paragraph(str(rev.modified_diagnosis), body_style),
+                    Paragraph("", body_style),
+                    Paragraph("", body_style),
+                ])
+            rev_rows.append([
+                Paragraph("<b>Physician Rationale:</b>", body_style),
+                Paragraph(str(rev.rationale), body_style),
+                Paragraph("", body_style),
+                Paragraph("", body_style),
+            ])
+            t_rev = Table(rev_rows, colWidths=[110, 160, 110, 160])
+            t_rev.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#bbf7d0')),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('SPAN', (1, len(rev_rows)-1), (3, len(rev_rows)-1)),
+            ]))
+            story.append(t_rev)
+        else:
+            story.append(Paragraph("Status: Pending clinician review. A licensed clinician must review and sign off before this summary is used for medical reference.", body_style))
+
+        doc.build(story)
+        pdf_bytes = buffer.getvalue()
+
+        await self.audit_repo.log_event(
+            action=AuditAction.REPORT_EXPORT_PDF,
+            resource_type=AuditResourceType.CASE,
+            resource_id=str(case_id),
+            user_id=viewer_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            details={"view_type": "report_pdf", "pdf_size_bytes": len(pdf_bytes)},
+        )
+        return pdf_bytes

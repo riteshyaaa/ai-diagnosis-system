@@ -4,7 +4,10 @@ import io
 import pytest
 from PIL import Image
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.user import UserRole
+from tests.auth_support import login_as_provisioned_role
 from tests.unit.test_image_processing import (
     create_synthetic_radiograph,
 )
@@ -20,7 +23,10 @@ def generate_test_radiograph_bytes(width: int = 256, height: int = 256) -> bytes
 
 
 @pytest.mark.asyncio
-async def test_case_upload_workflow_fails_closed_without_model_artifacts(client: AsyncClient):
+async def test_case_upload_workflow_fails_closed_without_model_artifacts(
+    client: AsyncClient,
+    db_session: AsyncSession,
+):
     """Verify authenticated intake works, while unavailable weights block inference."""
     # -------------------------------------------------------------------------
     # 1. Clinician Registration & Authentication
@@ -156,3 +162,90 @@ async def test_case_upload_workflow_fails_closed_without_model_artifacts(client:
     )
     assert predictions_res.status_code == 200
     assert predictions_res.json()["total"] == 0
+
+    # -------------------------------------------------------------------------
+    # 6. Report Preview Verification
+    # -------------------------------------------------------------------------
+    report_prev_res = await client.get(
+        f"/api/v1/cases/{case_id}/report-preview",
+        headers=clinician_headers,
+    )
+    assert report_prev_res.status_code == 200
+    preview = report_prev_res.json()
+    assert preview["case_id"] == case_id
+    assert preview["status"] == "DRAFT"
+    assert preview["prediction"] is None
+    assert preview["review"] is None
+    assert preview["image_input"] is not None
+    assert preview["clinical_input"] is not None
+
+    # -------------------------------------------------------------------------
+    # 7. PDF Report Generation & Export
+    # -------------------------------------------------------------------------
+    report_pdf_res = await client.get(
+        f"/api/v1/cases/{case_id}/report-pdf",
+        headers=clinician_headers,
+    )
+    assert report_pdf_res.status_code == 200
+    assert report_pdf_res.headers["content-type"] == "application/pdf"
+    assert report_pdf_res.content.startswith(b"%PDF")
+
+    # -------------------------------------------------------------------------
+    # 8. Cross-User Authorization Boundary Enforcement
+    # -------------------------------------------------------------------------
+    other_email = "dr.other@university-hospital.edu"
+    other_password = "MedSecure2026!Other"
+    reg_other = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": other_email,
+            "full_name": "Dr. Other Clinician, MD",
+            "password": other_password,
+            "department": "Internal Medicine",
+        },
+    )
+    assert reg_other.status_code == 201
+
+    login_other = await client.post(
+        "/api/v1/auth/login",
+        json={"email": other_email, "password": other_password},
+    )
+    assert login_other.status_code == 200
+    other_token = login_other.json()["access_token"]
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+
+    # Foreign doctor cannot access primary clinician's case or reports
+    forbidden_case = await client.get(f"/api/v1/cases/{case_id}", headers=other_headers)
+    assert forbidden_case.status_code in (403, 404)
+
+    forbidden_preview = await client.get(
+        f"/api/v1/cases/{case_id}/report-preview",
+        headers=other_headers,
+    )
+    assert forbidden_preview.status_code in (403, 404)
+
+    forbidden_pdf = await client.get(
+        f"/api/v1/cases/{case_id}/report-pdf",
+        headers=other_headers,
+    )
+    assert forbidden_pdf.status_code in (403, 404)
+
+    # -------------------------------------------------------------------------
+    # 9. Audit Event Trail & Auditor Access Control
+    # -------------------------------------------------------------------------
+    auditor_token = await login_as_provisioned_role(
+        client,
+        db_session,
+        role=UserRole.AUDITOR,
+        email="auditor.e2e@medfusion.local",
+        full_name="E2E Auditor",
+    )
+    auditor_headers = {"Authorization": f"Bearer {auditor_token}"}
+    audit_res = await client.get("/api/v1/audit-events", headers=auditor_headers)
+    assert audit_res.status_code == 200
+    events = audit_res.json()["items"]
+    assert len(events) > 0
+
+    # Non-auditor clinician cannot access audit events
+    clinician_audit = await client.get("/api/v1/audit-events", headers=clinician_headers)
+    assert clinician_audit.status_code == 403

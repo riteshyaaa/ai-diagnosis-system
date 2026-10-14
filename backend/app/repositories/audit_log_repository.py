@@ -18,7 +18,7 @@ from app.repositories.base import BaseRepository
 _SAFE_ENUM_DETAILS = {
     "auth_method": {"password", "refresh_token"},
     "lookup_method": {"mrn_search"},
-    "view_type": {"full_relational_graph", "report_preview"},
+    "view_type": {"full_relational_graph", "report_preview", "report_pdf"},
     "modality": {"image_only", "tabular_only", "multimodal"},
     "status": {
         "draft",
@@ -53,6 +53,7 @@ _SAFE_NUMBER_DETAILS = {
     "warnings_count",
     "features_count",
     "attention_regions_count",
+    "pdf_size_bytes",
 }
 _SAFE_BOOLEAN_DETAILS = {"mfa", "abstention_recommended"}
 _SAFE_CASE_STATUSES = {"draft", "submitted", "processing", "completed", "reviewed", "archived"}

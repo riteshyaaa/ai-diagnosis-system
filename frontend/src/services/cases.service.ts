@@ -69,4 +69,14 @@ export const caseService = {
   async deleteCase(caseId: string): Promise<void> {
     await api.delete(`/cases/${caseId}`);
   },
+
+  /**
+   * Download generated PDF diagnostic report for the case.
+   */
+  async downloadReportPdf(caseId: string): Promise<Blob> {
+    const response = await api.get(`/cases/${caseId}/report-pdf`, {
+      responseType: "blob",
+    });
+    return response.data;
+  },
 };

@@ -193,3 +193,38 @@ async def test_report_preview_is_owner_scoped(client: AsyncClient):
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_report_pdf_generation_and_audit(client: AsyncClient, db_session: AsyncSession):
+    headers = await register_clinician(client, "report.pdf.owner@hospital.org")
+    case_id = await create_tabular_case(client, headers)
+
+    response = await client.get(f"/api/v1/cases/{case_id}/report-pdf", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+    audit_result = await db_session.execute(
+        select(AuditLog).where(
+            AuditLog.resource_id == case_id,
+            AuditLog.action == AuditAction.REPORT_EXPORT_PDF,
+        )
+    )
+    event = audit_result.scalar_one_or_none()
+    assert event is not None
+    assert event.details["view_type"] == "report_pdf"
+    assert event.details["pdf_size_bytes"] > 0
+
+
+@pytest.mark.asyncio
+async def test_report_pdf_is_owner_scoped(client: AsyncClient):
+    owner_headers = await register_clinician(client, "report.pdf.private@hospital.org")
+    other_headers = await register_clinician(client, "report.pdf.intruder@hospital.org")
+    case_id = await create_tabular_case(client, owner_headers)
+
+    response = await client.get(
+        f"/api/v1/cases/{case_id}/report-pdf", headers=other_headers
+    )
+    assert response.status_code == 404
+
