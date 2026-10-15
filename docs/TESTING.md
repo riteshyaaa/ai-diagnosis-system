@@ -34,18 +34,21 @@ The frontend Vitest suite contains 12 tests across 6 files, including a stale-ou
 
 | Command/check | Result |
 |---|---|
-| `.venv\Scripts\python.exe -m pytest -q` | **Passed:** 177 passed, 14 skipped, 0 failed (191 collected); 30 warnings. Skips are model-dependent and require unavailable verified artifacts. |
+| Verification runtime | Python 3.11.14, Node.js 20.20.0, npm 10.8.2; PyTorch CPU. Optuna could not be installed from the available package index. |
+| Backend suite | **Incomplete:** 195 collected, 1 Optuna tuner test deselected; the process was OOM-killed (exit 137) at about 57% while running `tests/unit/test_explainability.py`. Before termination, the e2e, API, migration, configuration, and dataset-loader tests shown in the output passed; 14 existing model-dependent integration tests skipped. No full-suite pass is claimed. |
+| `pytest -q --confcutdir=tests/unit tests/unit/test_init_db.py` | **Passed:** 3 tests. Covers the isolated SQLite default, migration-only behavior, explicit database URL preservation, and production-environment refusal. |
+| DICOM upload API test | **Passed:** 1 test with pydicom 2.4.4 after adding a version-aware fixture call for the pydicom 2.x/3.x save API difference. |
+| Database initializer smoke test | **Passed:** applied Alembic migrations twice to disposable SQLite; revision is `003_prediction_input_refs`, 10 application tables exist, and the users table remains empty. |
 | `cd frontend && npm run lint` | **Passed.** |
-| `cd frontend && npm run build` | **Passed:** TypeScript and Vite build. Vite reports a roughly 832 kB minified JS chunk. |
+| `cd frontend && npm run build` | **Passed:** TypeScript and Vite build. Vite reports an 833 kB minified JS chunk (236.64 kB gzip). |
 | `cd frontend && npm test -- --run` | **Passed:** 6 files, 12 tests. |
-| Focused Ruff `E9,F` checks on `backend/app/config.py` and `tests/unit/test_config.py` | **Passed.** Broad Ruff remains unresolved. |
-| Mypy | **Unresolved:** previous run failed parsing installed NumPy stubs against the configured Python target; not rerun. |
-| Docker Compose build/start | **Blocked:** Docker Desktop engine pipe unavailable; no containers built or started. |
-| Alembic migrations | **Passed:** new revisions were applied/checked by migration tests against disposable SQLite databases; PostgreSQL migration execution is unverified. |
-| Production settings | **Passed:** all 16 focused configuration tests pass, including checks that rejected database credentials are not included in the error message and that an empty URL derives the Compose database URL from components. Environment-variable loading was also smoke-checked with `_env_file=None`. |
-| Compose YAML | **Passed:** parsed statically with PyYAML. Compose build/start remains unverified because Docker Desktop is unavailable. |
+| `npm audit` | **9 findings:** 5 high, 4 moderate, 0 critical. Remaining automatic fixes require major upgrades to Tailwind CSS 4 and React Router 7; these were not forced. |
+| FastAPI startup and `/health` | **Passed:** with the disposable migrated SQLite database, Uvicorn reached “Application startup complete” and `/health` returned HTTP 200. No server was left running. |
+| Windows PowerShell bootstrap | **Unverified:** updated for a Windows local database workflow, but this Linux environment has no PowerShell/Windows host to execute it. |
+| PostgreSQL / Docker Compose | **Unverified:** migrations were exercised only against disposable SQLite; Docker Compose build/start was not run. |
+| Broad Ruff / Mypy | **Unresolved:** not rerun in this implementation pass. |
 
-Tests did not use the local `.env`, local `medfusion.db`, ignored model artifacts, or patient records. Both development servers are stopped.
+The database smoke test used `/tmp/medfusion-init-test.db`; API tests use the in-memory SQLite fixture. No production database or patient records were used. The FastAPI smoke server was stopped after the health check.
 
 ## Coverage and CI
 
