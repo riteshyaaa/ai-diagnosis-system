@@ -64,16 +64,20 @@ docker compose --env-file .env -f docker/docker-compose.yml up --build -d
 
 ### Option 2: Local Development (Windows PowerShell)
 
-Use a separate development database or run `.\scripts\setup_local_windows.ps1` to configure `.venv`, dependencies, and the local SQLite database automatically. Do not point setup or tests at a database containing records you need to keep.
+Use Python 3.11 and Node.js 20 or newer. Run `.\scripts\setup_local_windows.ps1` from the repository root to configure `.venv`, install dependencies, and apply Alembic migrations to a separate local SQLite database. The script does not edit `.env`, create demo accounts, reset credentials, or drop data. It keeps the development database URL in the current PowerShell session; pass `-DatabaseUrl` only when you intend to use a different development database.
 
 ```powershell
-# Backend: from the repository root
+# One-command local setup: from the repository root
+.\scripts\setup_local_windows.ps1
+
+# Or configure the local environment and run each step manually
 $env:DATABASE_URL = "sqlite+aiosqlite:///./medfusion-dev.db"
 $env:APP_ENV = "development"
 $env:DEBUG = "true"
+$env:DEMO_USERS_ENABLED = "false"
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt -r ml/requirements.txt
-.\.venv\Scripts\python.exe -m alembic -c backend/alembic.ini upgrade head
+.\.venv\Scripts\python.exe scripts/init_db.py
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
 
@@ -84,9 +88,11 @@ npm ci
 npm run dev
 ```
 
-The API is at `http://localhost:8000`; Vite prints its frontend URL (usually `http://localhost:5173`). Keep the same `DATABASE_URL` in the backend shell for migrations and server startup. Demo personas are seeded only when `DEMO_USERS_ENABLED=true`, `APP_ENV=development`, and `DEBUG=true`; this setting must not be used outside local development.
+The API is at `http://localhost:8000`; the Vite frontend is at `http://localhost:3000`. Set the same `DATABASE_URL` in the backend shell before running migrations and starting the server. Demo personas are seeded only when `DEMO_USERS_ENABLED=true`, `APP_ENV=development`, and `DEBUG=true`; this setting is off by default and must not be used outside local development.
 
 The backend refuses to start unless Alembic has upgraded the selected database to the current head. Do not run migrations against an existing local database unless you have a backup and intend to upgrade it. Model inference remains unavailable (HTTP 503) until compatible artifacts and provenance are verified and promoted; ignored local files do not change that status.
+
+Run backend tests with `.\.venv\Scripts\python.exe -m pytest -q`. From `frontend/`, run `npm test -- --run`, `npm run lint`, and `npm run build`.
 
 ## 📁 Repository Structure
 

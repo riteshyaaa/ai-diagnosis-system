@@ -1,6 +1,6 @@
 # MedFusion AI — Architecture Overview
 
-> **Implementation note:** This document describes the code layout, not a verified production deployment. There are no provenance-verified active model checkpoints. An owner-scoped JSON report-preview API is present, but no report finalization, PDF, signature, or delivery workflow exists. An administrator/auditor-only audit-events read API is present; it is not tamper-evident. Owner-only checks now scope patient and case resources and nested clinical data. Team/tenant sharing is not implemented; see `SECURITY.md` before handling sensitive records.
+> **Implementation note:** This document describes the code layout, not a verified production deployment. There are no provenance-verified active model checkpoints. An owner-scoped JSON report preview and draft PDF summary are present; persisted report history, finalization, digital signatures, and controlled delivery are not implemented. An administrator/auditor-only audit-events read API is present; it is not tamper-evident. Owner-only checks now scope patient and case resources and nested clinical data. Team/tenant sharing is not implemented; see `SECURITY.md` before handling sensitive records.
 
 ## System Architecture
 

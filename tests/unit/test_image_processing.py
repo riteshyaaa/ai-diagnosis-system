@@ -9,6 +9,7 @@ Tests:
 """
 
 import io
+import inspect
 import numpy as np
 import pytest
 from PIL import Image
@@ -101,7 +102,10 @@ def create_synthetic_dicom_bytes(
     ds.PixelData = pixels.tobytes()
 
     buf = io.BytesIO()
-    ds.save_as(buf, enforce_file_format=True)
+    if "enforce_file_format" in inspect.signature(ds.save_as).parameters:
+        ds.save_as(buf, enforce_file_format=True)
+    else:
+        ds.save_as(buf, write_like_original=False)
     return buf.getvalue()
 
 

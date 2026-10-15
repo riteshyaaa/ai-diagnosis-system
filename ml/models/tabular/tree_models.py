@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import joblib
 import numpy as np
-import optuna
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
 import xgboost as xgb
@@ -216,6 +215,14 @@ class OptunaTabularTuner:
         """
         Run Optuna study to find optimal XGBoost hyperparameters maximizing validation ROC-AUC.
         """
+        try:
+            import optuna
+        except ImportError as exc:
+            raise RuntimeError(
+                "Tabular hyperparameter tuning requires Optuna. "
+                "Install the ML dependencies from ml/requirements.txt."
+            ) from exc
+
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
         def objective(trial: optuna.Trial) -> float:
